@@ -205,8 +205,6 @@
     </div>
 
     <script>
-      const CARD_BACK_URL = "https://files.mtg.wiki/Magic_card_back.jpg";
-
       function getRotateOverride() {
         const p = new URLSearchParams(window.location.search);
         if (!p.has("rotate")) return false;
@@ -343,9 +341,8 @@
 
       // --- Face flipping driven by /api/current `faces` ---
       let lastCardId = null;
-      let faces = []; // array of 1 or 2 URLs from server
+      let faces = []; // array of 2 URLs (front/back) from server
       let faceIndex = 0;
-      let showBackForSingle = false;
 
       function cacheBust(url) {
         if (!url) return url;
@@ -359,35 +356,17 @@
         }
       }
 
-      function currentDisplayUrl() {
-        if (!faces || faces.length === 0) return "";
-
-        if (faces.length >= 2) {
-          return faces[faceIndex] || faces[0];
-        }
-
-        // single-faced: show front or generic card back
-        return showBackForSingle ? CARD_BACK_URL : faces[0];
-      }
-
       function resetFlipStateIfNewCard(cardId) {
         if (cardId && cardId !== lastCardId) {
           lastCardId = cardId;
           faceIndex = 0;
-          showBackForSingle = false;
         }
       }
 
       clickCatcher.addEventListener("click", () => {
-        if (!faces || faces.length === 0) return;
-
-        if (faces.length >= 2) {
-          faceIndex = (faceIndex + 1) % 2;
-        } else {
-          showBackForSingle = !showBackForSingle;
-        }
-
-        const url = currentDisplayUrl();
+        if (!faces || faces.length < 2) return;
+        faceIndex = (faceIndex + 1) % 2;
+        const url = faces[faceIndex] || faces[0];
         if (url) img.src = cacheBust(url);
       });
 
@@ -398,13 +377,13 @@
           const r = await fetch("/api/current", { cache: "no-store" });
           const data = await r.json();
 
-          // Preferred new server payload: faces + card_id
           const nextFaces = Array.isArray(data.faces) ? data.faces.filter(Boolean) : [];
           const cardId = data.card_id || data.id || null;
 
-          // Backward compat: if server hasn't been updated yet
-          if (nextFaces.length === 0 && data.border_crop_url) {
-            nextFaces.push(String(data.border_crop_url));
+          if (nextFaces.length < 2) {
+            // If server isn't updated yet, fall back to old single URL behavior
+            // (but ideally server always sends 2 faces: [front, back])
+            if (data.border_crop_url) nextFaces.push(String(data.border_crop_url));
           }
 
           if (nextFaces.length === 0) {
@@ -422,10 +401,10 @@
 
           faces = nextFaces;
 
-          // If we used to have 2 faces but now only have 1 (or vice versa), reset flip state
-          if (faces.length < 2) faceIndex = 0;
+          // Always clamp to available faces
+          faceIndex = Math.min(faceIndex, faces.length - 1);
 
-          const displayUrl = currentDisplayUrl();
+          const displayUrl = faces[faceIndex] || faces[0];
           if (displayUrl && displayUrl !== lastRenderedUrl) {
             lastRenderedUrl = displayUrl;
             img.src = cacheBust(displayUrl);
