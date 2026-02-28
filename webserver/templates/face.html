@@ -11,6 +11,9 @@
         /* Punch-in kept, but disabled for now */
         --punch-x: 0;
         --punch-y: 0;
+
+        /* Crop a little off the bottom (3%) */
+        --crop-bottom: 0.03;
       }
 
       html, body {
@@ -39,7 +42,7 @@
         transform-origin: top left;
         transform: none;
 
-        overflow: hidden; /* allows cropping if we overflow width */
+        overflow: hidden; /* enables bottom crop + horizontal overflow crop */
       }
 
       html.rotate #cardWrap {
@@ -51,8 +54,8 @@
         inset: 0;
 
         width: 100%;
-        height: 100%;
-        object-fit: fill; /* wrap is already sized correctly by JS */
+        height: calc(100% / (1 - var(--crop-bottom))); /* scale up so we crop bottom only */
+        object-fit: fill; /* wrap is sized by JS */
         display: block;
 
         transform-origin: center center;
@@ -62,12 +65,12 @@
         );
       }
 
-      /* Rotated overlay layer (counters/arrows/etc). This rotates with cardWrap. */
-      .cardOverlay {
+      /* VIEWPORT overlay: buttons/counters anchored to viewport (not card) */
+      .uiOverlay {
         position: absolute;
         inset: 0;
-        z-index: 5;
-        pointer-events: none; /* overlay itself doesn't block; individual controls enable */
+        z-index: 10;
+        pointer-events: none; /* container doesn't eat input; buttons re-enable */
       }
 
       /* Shared pill button style */
@@ -107,12 +110,12 @@
       /* Hard force: if hidden attribute is present, it must not render */
       #countBtn[hidden] { display: none !important; }
 
-      /* Counter cluster anchored to card edges, 1/3 down the CARD (not viewport) */
+      /* Counter cluster anchored to VIEWPORT edges, 1/3 down the viewport */
       .counterBar {
         position: absolute;
-        top: 33.333%;
-        left: 0;     /* flush to card edge */
-        right: 0;    /* flush to card edge */
+        top: 33.333vh; /* one third down viewport */
+        left: 0;
+        right: 0;
         transform: translateY(-50%);
 
         display: flex;
@@ -129,14 +132,7 @@
         padding: 0 12px;
       }
 
-      /* Screen overlay (NOT rotated): QR lives here */
-      .screenOverlay {
-        position: absolute;
-        inset: 0;
-        z-index: 20;
-        pointer-events: none;
-      }
-
+      /* QR overlay (also viewport-anchored) */
       .qr {
         position: absolute;
         top: 12px;
@@ -171,23 +167,20 @@
     <div class="stage">
       <div id="cardWrap">
         <img id="card" alt="" />
-
-        <!-- This overlay rotates with the card -->
-        <div class="cardOverlay">
-          <div class="counterBar">
-            <div id="minusBtn" class="btn pm" role="button" tabindex="0" aria-label="Decrement">−</div>
-
-            <div class="counterCenter">
-              <div id="countBtn" class="btn smallText" hidden aria-hidden="true"></div>
-            </div>
-
-            <div id="plusBtn" class="btn pm" role="button" tabindex="0" aria-label="Increment">+</div>
-          </div>
-        </div>
       </div>
 
-      <!-- This overlay does NOT rotate -->
-      <div class="screenOverlay">
+      <!-- Viewport-anchored UI overlay -->
+      <div class="uiOverlay">
+        <div class="counterBar">
+          <div id="minusBtn" class="btn pm" role="button" tabindex="0" aria-label="Decrement">−</div>
+
+          <div class="counterCenter">
+            <div id="countBtn" class="btn smallText" hidden aria-hidden="true"></div>
+          </div>
+
+          <div id="plusBtn" class="btn pm" role="button" tabindex="0" aria-label="Increment">+</div>
+        </div>
+
         <div id="qrWrap" class="qr" hidden>
           <canvas id="qr" width="140" height="140"></canvas>
           <div id="qrLabel" class="label"></div>
@@ -210,33 +203,50 @@
       const cardWrap = document.getElementById("cardWrap");
       const img = document.getElementById("card");
 
-      // Fit strategy: match HEIGHT of the viewport. Width may overflow (cropped).
-      // We also center the wrap horizontally so overflow is cropped equally on both sides.
+      /*
+        Fit strategy: match the viewport "height" always; width may overflow (cropped).
+        Center on the overflow axis.
+
+        Important: when rotated, the wrap is rotated, so to make the *final visible result*
+        centered, we need to offset on TOP (not LEFT) before rotation.
+      */
       function fitCardWrapToViewport(naturalW, naturalH) {
         if (!naturalW || !naturalH) return;
 
         const vw = window.innerWidth;
         const vh = window.innerHeight;
 
-        // In rotate mode, the card's content axes are swapped.
-        const availW = rotate ? vh : vw;
-        const availH = rotate ? vw : vh;
+        if (!rotate) {
+          // Not rotated: make image height fill viewport height
+          const scale = vh / naturalH;
+          const w = Math.ceil(naturalW * scale);
+          const h = Math.ceil(naturalH * scale); // ~vh
 
-        // Height-first scaling: always use full height; allow width overflow.
-        const scale = availH / naturalH;
+          cardWrap.style.width = w + "px";
+          cardWrap.style.height = h + "px";
 
-        const w = Math.ceil(naturalW * scale);
+          // center horizontally
+          cardWrap.style.left = Math.floor((vw - w) / 2) + "px";
+          cardWrap.style.top = "0px";
+          return;
+        }
+
+        // Rotated: cardWrap content height in its own space becomes vw (because after rotate, width/height swap)
+        // We still want the *visible* rotated image to fill viewport height (vh). That corresponds to
+        // the wrap's WIDTH before rotation.
+        //
+        // So we scale so that (wrap width) == vh after scaling.
+        const scale = vh / naturalW;
+        const w = Math.ceil(naturalW * scale); // ~vh
         const h = Math.ceil(naturalH * scale);
 
         cardWrap.style.width = w + "px";
         cardWrap.style.height = h + "px";
 
-        // Center horizontally within the available (unrotated) viewport space.
-        // For non-rotate, this centers in the real viewport.
-        // For rotate, availW is swapped as above so centering still looks correct after transform.
-        const left = Math.floor((availW - w) / 2);
-        cardWrap.style.left = left + "px";
-        cardWrap.style.top = "0px";
+        // After rotate(90deg) translateY(-100%), horizontal centering becomes a PRE-rotation TOP offset.
+        // So we shift "top" to center the overflow that becomes left/right after rotation.
+        cardWrap.style.left = "0px";
+        cardWrap.style.top = Math.floor((vw - h) / 2) + "px";
       }
 
       // --- Counter UI ---
