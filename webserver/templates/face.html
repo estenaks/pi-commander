@@ -111,19 +111,11 @@
         return null;
       }
 
-      function shouldShowQr() {
-        const p = new URLSearchParams(window.location.search);
-        if (!p.has("qr")) return true; // default ON
-        const v = (p.get("qr") || "").trim().toLowerCase();
-        if (["0", "false", "no", "off"].includes(v)) return false;
-        return true;
-      }
-
       // Manual-only: default is NO rotation unless rotate=1 (etc) is provided
       const override = getRotateOverride();
       if (override === true) document.documentElement.classList.add("rotate");
 
-      // --- QR code overlay (client-side, no server deps) ---
+      // --- QR code (only shown when there is NO image url) ---
       async function loadQrLib() {
         const src = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
         await new Promise((resolve, reject) => {
@@ -159,9 +151,7 @@
         }
       }
 
-      async function initQr() {
-        if (!shouldShowQr()) return;
-
+      async function showQr() {
         const wrap = document.getElementById("qrWrap");
         const canvas = document.getElementById("qr");
         const label = document.getElementById("qrLabel");
@@ -174,14 +164,18 @@
         try {
           await loadQrLib();
           drawQrToCanvas(url, canvas);
-          wrap.hidden = false;
+          canvas.style.display = "block";
         } catch (e) {
-          wrap.hidden = false;
+          // CDN failed: show text only
           canvas.style.display = "none";
         }
+
+        wrap.hidden = false;
       }
 
-      initQr();
+      function hideQr() {
+        document.getElementById("qrWrap").hidden = true;
+      }
 
       // --- image polling ---
       const img = document.getElementById("card");
@@ -192,14 +186,31 @@
           const r = await fetch("/api/current", { cache: "no-store" });
           const data = await r.json();
 
-          if (data.border_crop_url && data.border_crop_url !== lastUrl) {
-            lastUrl = data.border_crop_url;
+          const url = (data && data.border_crop_url) ? String(data.border_crop_url) : "";
 
-            const u = new URL(lastUrl);
+          if (!url) {
+            // No image configured yet -> show QR so you can open /config
+            if (lastUrl !== "") {
+              lastUrl = "";
+              img.removeAttribute("src");
+            }
+            showQr();
+            return;
+          }
+
+          // We have an image URL -> hide QR
+          hideQr();
+
+          if (url !== lastUrl) {
+            lastUrl = url;
+
+            const u = new URL(url);
             u.searchParams.set("_t", Date.now().toString());
             img.src = u.toString();
           }
-        } catch (e) {}
+        } catch (e) {
+          // On error, do nothing (keeps last state)
+        }
       }
 
       poll();
