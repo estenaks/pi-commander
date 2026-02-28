@@ -23,44 +23,21 @@
         --pre-bg: rgba(255,255,255,0.06);
       }
 
-      /* Optional light mode if you ever want it: add ?theme=light */
-      html.theme-light {
-        color-scheme: light;
-
-        --bg: #ffffff;
-        --panel: #f6f8fb;
-        --text: #0f172a;
-        --muted: #475569;
-        --border: rgba(15,23,42,0.16);
-        --border2: rgba(15,23,42,0.10);
-        --shadow: rgba(15,23,42,0.10);
-        --accent: #2563eb;
-
-        --input-bg: rgba(15,23,42,0.05);
-        --btn-bg: rgba(15,23,42,0.08);
-        --btn-bg-hover: rgba(15,23,42,0.12);
-        --pre-bg: rgba(15,23,42,0.05);
-      }
-
       body {
         font-family: sans-serif;
         padding: 16px;
         max-width: 900px;
-
         background: var(--bg);
         color: var(--text);
       }
 
       h1 { margin-top: 0; }
-
       .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-
-      input[type="text"] {
+      input[type="text"], select {
         padding: 10px;
         font-size: 16px;
         flex: 1;
         min-width: 240px;
-
         color: var(--text);
         background: var(--input-bg);
         border: 1px solid var(--border);
@@ -68,16 +45,12 @@
         outline: none;
       }
 
-      input[type="text"]:focus {
-        border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
-      }
+      select { flex: 0 0 auto; min-width: 170px; }
 
       button {
         padding: 10px 14px;
         font-size: 16px;
         cursor: pointer;
-
         color: var(--text);
         background: var(--btn-bg);
         border: 1px solid var(--border);
@@ -90,14 +63,12 @@
       fieldset {
         margin-top: 12px;
         padding: 10px 12px;
-
         border: 1px solid var(--border);
         border-radius: 12px;
         background: color-mix(in srgb, var(--panel) 70%, transparent);
       }
 
       label { margin-right: 12px; white-space: nowrap; }
-
       .status { margin-top: 12px; color: var(--muted); }
 
       img {
@@ -106,7 +77,6 @@
         height: auto;
         display: block;
         margin-top: 12px;
-
         border: 1px solid var(--border2);
         border-radius: 12px;
         box-shadow: 0 10px 30px var(--shadow);
@@ -117,7 +87,6 @@
         background: var(--pre-bg);
         padding: 12px;
         overflow: auto;
-
         border: 1px solid var(--border);
         border-radius: 12px;
       }
@@ -129,6 +98,13 @@
     <h1>/config</h1>
 
     <div class="row">
+      <select id="player">
+        <option value="1">Player 1 (/face)</option>
+        <option value="2">Player 2 (/player2)</option>
+        <option value="3">Player 3 (/player3)</option>
+        <option value="4">Player 4 (/player4)</option>
+      </select>
+
       <input id="q" type="text" placeholder='Search card name (fuzzy), e.g. "norin the wary"' />
       <button id="searchBtn">Search</button>
       <button id="randomBtn">Get random commander</button>
@@ -158,15 +134,9 @@
     <pre id="json"></pre>
 
     <script>
-      // Optional: allow overriding theme with ?theme=light
-      (function initTheme() {
-        const p = new URLSearchParams(location.search);
-        const theme = (p.get("theme") || "").trim().toLowerCase();
-        if (theme === "light") document.documentElement.classList.add("theme-light");
-      })();
-
       const DEFAULT_QUERY = "norin the wary";
 
+      const playerEl = document.getElementById("player");
       const qEl = document.getElementById("q");
       const statusEl = document.getElementById("status");
       const previewEl = document.getElementById("preview");
@@ -194,31 +164,42 @@
           .sort();
       }
 
+      function playerNum() {
+        return Number(playerEl.value || "1") || 1;
+      }
+
       async function doSearch(query) {
         const q = (query || "").trim();
         if (!q) return;
 
-        setBusy(`Searching Scryfall for "${q}"...`);
-        const { r, data } = await postJson("/api/search", { q });
+        const p = playerNum();
+        setBusy(`Searching Scryfall for "${q}" (player ${p})...`);
+        const { r, data } = await postJson(`/api/search/${p}`, { q });
 
         jsonEl.textContent = JSON.stringify(data, null, 2);
         if (!r.ok) { statusEl.textContent = "Error (see JSON below)"; return; }
 
-        statusEl.textContent = `Now showing: ${data.name}`;
+        statusEl.textContent = `Player ${p} now showing: ${data.name}`;
         previewEl.src = data.border_crop_url;
       }
 
       async function doRandomCommander() {
         const colors = selectedColors();
-        const label = colors.length ? ` (exact id=${colors.join("")})` : "";
-        setBusy(`Getting random commander${label}...`);
+        const p = playerNum();
 
-        const { r, data } = await postJson("/api/random", { colors, identity_match: "exact", mode: "commander" });
+        const label = colors.length ? ` (exact id=${colors.join("")})` : "";
+        setBusy(`Getting random commander${label} (player ${p})...`);
+
+        const { r, data } = await postJson(`/api/random/${p}`, {
+          colors,
+          identity_match: "exact",
+          mode: "commander",
+        });
 
         jsonEl.textContent = JSON.stringify(data, null, 2);
         if (!r.ok) { statusEl.textContent = "Error (see JSON below)"; return; }
 
-        statusEl.textContent = `Now showing (random commander): ${data.name}`;
+        statusEl.textContent = `Player ${p} now showing (random commander): ${data.name}`;
         previewEl.src = data.border_crop_url;
       }
 
