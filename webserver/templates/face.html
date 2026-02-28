@@ -242,8 +242,6 @@
       // --- face/flip state ---
       let lastCardId = null;
 
-      // One-sided: toggles between front art_crop and card back.
-      // Two-sided: toggles between face 0 and face 1 border_crop.
       let isTwoSided = false;
       let faceIndex = 0; // 0 or 1 for two-sided
       let showBackForOneSided = false;
@@ -258,7 +256,6 @@
           u.searchParams.set("_t", Date.now().toString());
           return u.toString();
         } catch {
-          // If it's not a valid absolute URL, just append
           const joiner = url.includes("?") ? "&" : "?";
           return url + joiner + "_t=" + Date.now().toString();
         }
@@ -270,10 +267,8 @@
 
       function computeDisplayUrl() {
         if (isTwoSided) {
-          const u = twoSidedFaceUrls[faceIndex] || oneSidedFrontUrl;
-          return u;
+          return twoSidedFaceUrls[faceIndex] || twoSidedFaceUrls[0] || oneSidedFrontUrl;
         }
-        // one-sided
         return showBackForOneSided ? CARD_BACK_URL : oneSidedFrontUrl;
       }
 
@@ -288,14 +283,14 @@
           isTwoSided = twoSided;
           faceIndex = 0;
           showBackForOneSided = false;
-        } else {
-          // If we don't have an id, still ensure isTwoSided is up-to-date
+          return;
+        }
+
+        // No id or same id: if twoSided-ness changes, reset.
+        if (twoSided !== isTwoSided) {
           isTwoSided = twoSided;
-          // If the layout changes between polls, reset the flip state
-          if (twoSided !== isTwoSided) {
-            faceIndex = 0;
-            showBackForOneSided = false;
-          }
+          faceIndex = 0;
+          showBackForOneSided = false;
         }
       }
 
@@ -413,7 +408,7 @@
       // --- image polling ---
       let lastUrl = null;
 
-      function getScryfallFrontUrl(data) {
+      function getScryfallImageInfo(data) {
         // Two-sided (transform/MDFC/etc)
         if (data && Array.isArray(data.card_faces) && data.card_faces.length >= 2) {
           const a = data.card_faces[0] && data.card_faces[0].image_uris;
@@ -422,8 +417,9 @@
           const u0 = a && (a.border_crop || a.normal || a.large || a.png || a.art_crop);
           const u1 = b && (b.border_crop || b.normal || b.large || b.png || b.art_crop);
 
-          if (u0 && u1) {
-            return { twoSided: true, id: data.id || null, face0: u0, face1: u1 };
+          // Treat as two-sided even if only one exists; but require at least face0 to render.
+          if (u0) {
+            return { twoSided: true, id: data.id || null, face0: u0, face1: u1 || u0 };
           }
         }
 
@@ -434,7 +430,7 @@
           return { twoSided: false, id: data.id || null, front: u };
         }
 
-        // Fallback for your older server payloads that only provided border_crop_url
+        // Fallback for older server payloads that only provided border_crop_url
         if (data && data.border_crop_url) {
           return { twoSided: false, id: data.id || null, front: String(data.border_crop_url) };
         }
@@ -447,12 +443,9 @@
           const r = await fetch("/api/current", { cache: "no-store" });
           const data = await r.json();
 
-          const info = getScryfallFrontUrl(data);
-          const url = info
-            ? (info.twoSided ? info.face0 : info.front)
-            : "";
+          const info = getScryfallImageInfo(data);
 
-          if (!url) {
+          if (!info) {
             if (lastUrl !== "") {
               lastUrl = "";
               img.removeAttribute("src");
@@ -463,24 +456,18 @@
 
           hideQr();
 
-          // If new card (id changes), reset flip state
-          if (info) {
-            if (info.twoSided) {
-              resetFaceStateForNewCard(info.id, true);
-              twoSidedFaceUrls = [info.face0, info.face1];
-              oneSidedFrontUrl = info.face0; // not used, but keeps fallback sane
-            } else {
-              resetFaceStateForNewCard(info.id, false);
-              oneSidedFrontUrl = info.front;
-              twoSidedFaceUrls = [null, null];
-            }
+          if (info.twoSided) {
+            resetFaceStateForNewCard(info.id, true);
+            twoSidedFaceUrls = [info.face0, info.face1];
+            oneSidedFrontUrl = info.face0;
+          } else {
+            resetFaceStateForNewCard(info.id, false);
+            oneSidedFrontUrl = info.front;
+            twoSidedFaceUrls = [null, null];
           }
 
-          // Render based on current flip state (this may show back/face1)
           const displayUrl = computeDisplayUrl();
-
-          // Only set src when display URL changes
-          if (displayUrl !== lastUrl) {
+          if (displayUrl && displayUrl !== lastUrl) {
             lastUrl = displayUrl;
             renderFace();
           }
