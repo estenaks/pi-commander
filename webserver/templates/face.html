@@ -84,6 +84,29 @@
         word-break: break-word;
         opacity: 0.95;
       }
+
+      /* Navigation arrows (overlay, 1/3 down the viewport) */
+      .nav {
+        position: absolute;
+        top: 33.333vh;           /* one third down the screen */
+        transform: translateY(-50%);
+        width: 64px;
+        height: 64px;
+
+        display: grid;
+        place-items: center;
+
+        color: rgba(255,255,255,0.85);
+        background: rgba(0,0,0,0.35);
+        border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 999px;
+
+        font: 44px/1 sans-serif;
+        user-select: none;
+      }
+
+      .nav-left { left: 12px; }
+      .nav-right { right: 12px; }
     </style>
   </head>
 
@@ -98,6 +121,10 @@
           <canvas id="qr" width="140" height="140"></canvas>
           <div id="qrLabel" class="label"></div>
         </div>
+
+        <!-- One third down the screen, anchored to edges -->
+        <div class="nav nav-left" aria-hidden="true">‹</div>
+        <div class="nav nav-right" aria-hidden="true">›</div>
       </div>
     </div>
 
@@ -105,15 +132,19 @@
       function getRotateOverride() {
         const p = new URLSearchParams(window.location.search);
         if (!p.has("rotate")) return null;
+
         const v = (p.get("rotate") || "").trim().toLowerCase();
         if (["1", "true", "yes", "on"].includes(v)) return true;
         if (["0", "false", "no", "off"].includes(v)) return false;
+
         return null;
       }
 
       // Manual-only: default is NO rotation unless rotate=1 (etc) is provided
       const override = getRotateOverride();
-      if (override === true) document.documentElement.classList.add("rotate");
+      if (override === true) {
+        document.documentElement.classList.add("rotate");
+      }
 
       // --- QR code (only shown when there is NO image url) ---
       async function loadQrLib() {
@@ -166,7 +197,6 @@
           drawQrToCanvas(url, canvas);
           canvas.style.display = "block";
         } catch (e) {
-          // CDN failed: show text only
           canvas.style.display = "none";
         }
 
@@ -189,7 +219,6 @@
           const url = (data && data.border_crop_url) ? String(data.border_crop_url) : "";
 
           if (!url) {
-            // No image configured yet -> show QR so you can open /config
             if (lastUrl !== "") {
               lastUrl = "";
               img.removeAttribute("src");
@@ -198,7 +227,6 @@
             return;
           }
 
-          // We have an image URL -> hide QR
           hideQr();
 
           if (url !== lastUrl) {
@@ -209,7 +237,7 @@
             img.src = u.toString();
           }
         } catch (e) {
-          // On error, do nothing (keeps last state)
+          // keep last state
         }
       }
 
