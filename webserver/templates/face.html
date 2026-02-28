@@ -56,11 +56,11 @@
         z-index: 10;
       }
 
-      /* QR badge */
+      /* QR badge (TOP-LEFT) */
       .qr {
         position: absolute;
         top: 12px;
-        right: 12px;
+        left: 12px;
         background: rgba(0,0,0,0.55);
         border: 1px solid rgba(255,255,255,0.25);
         padding: 10px;
@@ -124,9 +124,7 @@
       if (override === true) document.documentElement.classList.add("rotate");
 
       // --- QR code overlay (client-side, no server deps) ---
-      // We use a lightweight QR generator from a CDN.
       async function loadQrLib() {
-        // qrcode-generator (small, no DOM dependencies)
         const src = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
         await new Promise((resolve, reject) => {
           const s = document.createElement("script");
@@ -138,7 +136,6 @@
       }
 
       function drawQrToCanvas(text, canvas) {
-        // qrcode(typeNumber, errorCorrectionLevel)
         const qr = window.qrcode(0, "M");
         qr.addData(text);
         qr.make();
@@ -149,11 +146,9 @@
         const scale = Math.floor(size / count);
         const offset = Math.floor((size - count * scale) / 2);
 
-        // background
         ctx.fillStyle = "#fff";
         ctx.fillRect(0, 0, size, size);
 
-        // modules
         ctx.fillStyle = "#000";
         for (let r = 0; r < count; r++) {
           for (let c = 0; c < count; c++) {
@@ -171,7 +166,6 @@
         const canvas = document.getElementById("qr");
         const label = document.getElementById("qrLabel");
 
-        // Prefer raspberrypi.local, otherwise use current host
         const baseHost = "raspberrypi.local";
         const url = `${location.protocol}//${baseHost}${location.port ? ":" + location.port : ""}/config`;
 
@@ -182,7 +176,6 @@
           drawQrToCanvas(url, canvas);
           wrap.hidden = false;
         } catch (e) {
-          // If CDN fails, show the URL text only
           wrap.hidden = false;
           canvas.style.display = "none";
         }
@@ -202,14 +195,11 @@
           if (data.border_crop_url && data.border_crop_url !== lastUrl) {
             lastUrl = data.border_crop_url;
 
-            // Bust cache so updates show immediately even if URL repeats
             const u = new URL(lastUrl);
             u.searchParams.set("_t", Date.now().toString());
             img.src = u.toString();
           }
-        } catch (e) {
-          // silent for now
-        }
+        } catch (e) {}
       }
 
       poll();
