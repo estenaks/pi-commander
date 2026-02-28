@@ -7,8 +7,10 @@
     <style>
       :root {
         --bg: #000;
-        --punch-x: 0.05; /* crop 5% from left AND right */
-        --punch-y: 0.03; /* add a tiny uniform vertical zoom to counter perceived squish */
+
+        /* Punch-in kept, but disabled for now */
+        --punch-x: 0;
+        --punch-y: 0;
       }
 
       html, body {
@@ -37,24 +39,20 @@
         transform-origin: top left;
         transform: none;
 
-        overflow: hidden; /* required for punch-in crop */
+        overflow: hidden; /* allows cropping if we overflow width */
       }
 
       html.rotate #cardWrap {
         transform: rotate(90deg) translateY(-100%);
       }
 
-      /*
-        Crop mostly on X, but allow a small Y zoom as well (still no distortion of aspect
-        inside the box; this is just a controlled crop).
-      */
       #card {
         position: absolute;
         inset: 0;
 
         width: 100%;
         height: 100%;
-        object-fit: fill; /* wrap is sized to preserve aspect */
+        object-fit: fill; /* wrap is already sized correctly by JS */
         display: block;
 
         transform-origin: center center;
@@ -212,18 +210,22 @@
       const cardWrap = document.getElementById("cardWrap");
       const img = document.getElementById("card");
 
+      // Fit strategy: match HEIGHT of the viewport. Width may overflow (cropped).
       function fitCardWrapToViewport(naturalW, naturalH) {
         if (!naturalW || !naturalH) return;
 
         const vw = window.innerWidth;
         const vh = window.innerHeight;
 
+        // In rotate mode, the card's content axes are swapped.
         const availW = rotate ? vh : vw;
         const availH = rotate ? vw : vh;
 
-        const scale = Math.min(availW / naturalW, availH / naturalH);
-        const w = Math.floor(naturalW * scale);
-        const h = Math.floor(naturalH * scale);
+        // Height-first scaling: always use full height; allow width overflow.
+        const scale = availH / naturalH;
+
+        const w = Math.ceil(naturalW * scale);
+        const h = Math.ceil(naturalH * scale); // will equal availH (within rounding)
 
         cardWrap.style.width = w + "px";
         cardWrap.style.height = h + "px";
