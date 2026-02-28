@@ -14,9 +14,12 @@ _state_lock = threading.Lock()
 _state = {
     "last_query": None,
     "card_id": None,
-    "faces": [],  # always length 2 when a card is loaded
-    "type_lines": [],  # list of 1 or 2 type_line strings (front/back or just front)
-    "is_planeswalker": False,
+    # faces_meta: always length 2 when a card is loaded
+    # [
+    #   {"image_url": "...", "type_line": "..."},
+    #   {"image_url": "...", "type_line": "..."}  # either back face or card back
+    # ]
+    "faces_meta": [],
     # Backward compat for older frontends:
     "border_crop_url": None,
 }
@@ -46,7 +49,7 @@ def _scryfall_get(url: str) -> dict:
 
 def _pick_image_border_crop_only(iu: dict) -> str:
     """
-    Always use border_crop (never art_crop). Fallbacks are only used if border_crop is missing.
+    Always use border_crop when possible.
     """
     if not isinstance(iu, dict):
         return ""
@@ -59,30 +62,43 @@ def _pick_image_border_crop_only(iu: dict) -> str:
         or ""
     )
 
-def _extract_faces_always_two(card: dict) -> list[str]:
+def _extract_faces_meta_always_two(card: dict) -> list[dict]:
     """
-    Returns exactly two URLs:
-      - DFC: [face0_border_crop, face1_border_crop]
-      - single-faced: [front_border_crop, CARD_BACK_URL]
+    Returns exactly 2 face objects:
+      - DFC: [face0(border_crop, type_line), face1(border_crop, type_line)]
+      - single-faced: [front(border_crop, type_line), cardback(CARD_BACK_URL, "Card Back")]
     """
+    # DFC / modal etc
     faces = card.get("card_faces") or []
     if isinstance(faces, list) and len(faces) >= 2:
-        iu0 = (faces[0] or {}).get("image_uris") or {}
-        iu1 = (faces[1] or {}).get("image_uris") or {}
+        f0 = faces[0] or {}
+        f1 = faces[1] or {}
 
-        u0 = _pick_image_border_crop_only(iu0)
-        u1 = _pick_image_border_crop_only(iu1)
+        u0 = _pick_image_border_crop_only((f0.get("image_uris") or {}))
+        u1 = _pick_image_border_crop_only((f1.get("image_uris") or {}))
+
+        tl0 = f0.get("type_line") if isinstance(f0.get("type_line"), str) else ""
+        tl1 = f1.get("type_line") if isinstance(f1.get("type_line"), str) else ""
 
         if u0:
             if not u1:
                 u1 = u0
-            return [u0, u1]
+            return [
+                {"image_url": u0, "type_line": tl0},
+                {"image_url": u1, "type_line": tl1},
+            ]
 
+    # single-faced
     iu = card.get("image_uris") or {}
     front = _pick_image_border_crop_only(iu)
     if not front:
         return []
-    return [front, CARD_BACK_URL]
+
+    tl = card.get("type_line") if isinstance(card.get("type_line"), str) else ""
+    return [
+        {"image_url": front, "type_line": tl},
+        {"image_url": CARD_BACK_URL, "type_line": "Card Back"},
+    ]
 
 def _extract_border_crop(card: dict) -> str:
     border_crop = (card.get("image_uris") or {}).get("border_crop")
@@ -96,35 +112,6 @@ def _extract_border_crop(card: dict) -> str:
             return bc
 
     return ""
-
-def _extract_type_lines(card: dict) -> list[str]:
-    """
-    Returns a list of 1 or 2 type_line strings.
-    - For DFC/MDFC: returns [face0.type_line, face1.type_line] (if present)
-    - For single-faced: returns [card.type_line] (if present)
-    """
-    faces = card.get("card_faces") or []
-    out: list[str] = []
-
-    if isinstance(faces, list) and len(faces) >= 2:
-        for face in faces[:2]:
-            tl = (face or {}).get("type_line")
-            if isinstance(tl, str) and tl.strip():
-                out.append(tl.strip())
-        if out:
-            # Ensure length 2 for convenience (duplicate if needed)
-            if len(out) == 1:
-                out.append(out[0])
-            return out
-
-    tl = card.get("type_line")
-    if isinstance(tl, str) and tl.strip():
-        return [tl.strip()]
-
-    return []
-
-def _is_planeswalker_from_type_lines(type_lines: list[str]) -> bool:
-    return any("Planeswalker" in tl for tl in (type_lines or []))
 
 @app.get("/")
 def index():
@@ -141,13 +128,16 @@ def face():
 @app.get("/api/current")
 def api_current():
     with _state_lock:
+        # Convenience fields for frontend:
+        faces = _state["faces_meta"]
         return jsonify({
             "last_query": _state["last_query"],
             "card_id": _state["card_id"],
-            "faces": _state["faces"],  # ALWAYS two when present
-            "type_lines": _state["type_lines"],  # 1 or 2 strings
-            "is_planeswalker": _state["is_planeswalker"],
-            # backward compat:
+
+            # New payload: full per-face metadata
+            "faces": faces,
+
+            # Backward compat:
             "border_crop_url": _state["border_crop_url"],
         })
 
@@ -163,21 +153,16 @@ def api_search():
         url = f"https://api.scryfall.com/cards/named?{params}"
         card = _scryfall_get(url)
 
-        faces = _extract_faces_always_two(card)
-        if not faces:
+        faces_meta = _extract_faces_meta_always_two(card)
+        if not faces_meta:
             return jsonify({"error": "No suitable image found for this card"}), 422
 
-        type_lines = _extract_type_lines(card)
-        is_pw = _is_planeswalker_from_type_lines(type_lines)
-
-        border_crop = _extract_border_crop(card) or faces[0]
+        border_crop = _extract_border_crop(card) or faces_meta[0]["image_url"]
 
         with _state_lock:
             _state["last_query"] = query
             _state["card_id"] = card.get("id")
-            _state["faces"] = faces
-            _state["type_lines"] = type_lines
-            _state["is_planeswalker"] = is_pw
+            _state["faces_meta"] = faces_meta
             _state["border_crop_url"] = border_crop
 
         return jsonify({
@@ -185,9 +170,7 @@ def api_search():
             "mode": "search",
             "name": card.get("name"),
             "card_id": card.get("id"),
-            "faces": faces,
-            "type_lines": type_lines,
-            "is_planeswalker": is_pw,
+            "faces": faces_meta,
             "border_crop_url": border_crop,
             "scryfall_uri": card.get("scryfall_uri"),
         })
@@ -218,21 +201,16 @@ def api_random():
         url = "https://api.scryfall.com/cards/random?" + urllib.parse.urlencode({"q": q})
         card = _scryfall_get(url)
 
-        faces = _extract_faces_always_two(card)
-        if not faces:
+        faces_meta = _extract_faces_meta_always_two(card)
+        if not faces_meta:
             return jsonify({"error": "No suitable image found for this random card"}), 422
 
-        type_lines = _extract_type_lines(card)
-        is_pw = _is_planeswalker_from_type_lines(type_lines)
-
-        border_crop = _extract_border_crop(card) or faces[0]
+        border_crop = _extract_border_crop(card) or faces_meta[0]["image_url"]
 
         with _state_lock:
             _state["last_query"] = q
             _state["card_id"] = card.get("id")
-            _state["faces"] = faces
-            _state["type_lines"] = type_lines
-            _state["is_planeswalker"] = is_pw
+            _state["faces_meta"] = faces_meta
             _state["border_crop_url"] = border_crop
 
         return jsonify({
@@ -241,9 +219,7 @@ def api_random():
             "query": q,
             "name": card.get("name"),
             "card_id": card.get("id"),
-            "faces": faces,
-            "type_lines": type_lines,
-            "is_planeswalker": is_pw,
+            "faces": faces_meta,
             "border_crop_url": border_crop,
             "scryfall_uri": card.get("scryfall_uri"),
         })
