@@ -7,7 +7,8 @@
     <style>
       :root {
         --bg: #000;
-        --punch-x: 0.05; /* crop 5% from left AND right only */
+        --punch-x: 0.05; /* crop 5% from left AND right */
+        --punch-y: 0.05; /* add a tiny uniform vertical zoom to counter perceived squish */
       }
 
       html, body {
@@ -35,7 +36,8 @@
 
         transform-origin: top left;
         transform: none;
-        overflow: hidden; /* important for punch-in crop */
+
+        overflow: hidden; /* required for punch-in crop */
       }
 
       html.rotate #cardWrap {
@@ -43,20 +45,23 @@
       }
 
       /*
-        Punch-in ONLY on the X axis:
-        - crop ~5% from left and right
-        - keep top/bottom unchanged
+        Crop mostly on X, but allow a small Y zoom as well (still no distortion of aspect
+        inside the box; this is just a controlled crop).
       */
       #card {
         position: absolute;
-        top: 0;
-        left: calc(-1 * var(--punch-x) * 100%);
+        inset: 0;
 
-        width: calc(100% * (1 + (2 * var(--punch-x))));
+        width: 100%;
         height: 100%;
-
-        object-fit: fill; /* wrap already matches desired aspect */
+        object-fit: fill; /* wrap is sized to preserve aspect */
         display: block;
+
+        transform-origin: center center;
+        transform: scale(
+          calc(1 + (2 * var(--punch-x))),
+          calc(1 + (2 * var(--punch-y)))
+        );
       }
 
       /* Rotated overlay layer (counters/arrows/etc). This rotates with cardWrap. */
