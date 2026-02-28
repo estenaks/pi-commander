@@ -7,7 +7,7 @@
     <style>
       :root {
         --bg: #000;
-        --punch: 0.05; /* 5% zoom/crop to remove black border */
+        --punch-x: 0.05; /* crop 5% from left AND right only */
       }
 
       html, body {
@@ -43,16 +43,17 @@
       }
 
       /*
-        The card image is slightly zoomed in to crop ~5% off each edge.
-        We also offset it so the zoom stays centered.
+        Punch-in ONLY on the X axis:
+        - crop ~5% from left and right
+        - keep top/bottom unchanged
       */
       #card {
         position: absolute;
-        top: calc(-1 * var(--punch) * 100%);
-        left: calc(-1 * var(--punch) * 100%);
+        top: 0;
+        left: calc(-1 * var(--punch-x) * 100%);
 
-        width: calc(100% * (1 + (2 * var(--punch))));
-        height: calc(100% * (1 + (2 * var(--punch))));
+        width: calc(100% * (1 + (2 * var(--punch-x))));
+        height: 100%;
 
         object-fit: fill; /* wrap already matches desired aspect */
         display: block;
