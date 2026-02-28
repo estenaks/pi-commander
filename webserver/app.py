@@ -7,13 +7,15 @@ import urllib.error
 
 app = Flask(__name__)
 
+CARD_BACK_URL = "https://files.mtg.wiki/Magic_card_back.jpg"
+
 # Simple in-memory shared state (POC)
 _state_lock = threading.Lock()
 _state = {
     "last_query": None,
     "card_id": None,
-    "faces": [],  # list of image urls (len 1 for single-faced, len 2 for DFC)
-    # Backward-compat / existing consumer:
+    "faces": [],  # always length 2 when a card is loaded
+    # Backward compat for older frontends:
     "border_crop_url": None,
 }
 
@@ -40,56 +42,64 @@ def _scryfall_get(url: str) -> dict:
     except Exception as e:
         raise RuntimeError(f"Scryfall request failed: {type(e).__name__}: {e}") from e
 
-def _extract_faces(card: dict) -> list[str]:
+def _pick_image(iu: dict, *, prefer_art_crop: bool) -> str:
     """
-    Returns 1 or 2 image URLs.
-    - Single-faced: prefer art_crop (per your request), fall back to border_crop.
-    - Multi-faced: use each face's border_crop (fall back to art_crop/normal if needed).
+    prefer_art_crop:
+      - True for single-faced cards (per your earlier request)
+      - False for faces of DFCs (use border_crop)
     """
-    faces = card.get("card_faces") or []
-    out: list[str] = []
-
-    # Multi-faced cards (transform/MDFC/etc.)
-    if isinstance(faces, list) and len(faces) >= 2:
-        for face in faces[:2]:
-            iu = face.get("image_uris") or {}
-            url = (
-                iu.get("border_crop")
-                or iu.get("art_crop")
-                or iu.get("normal")
-                or iu.get("large")
-                or iu.get("png")
-            )
-            if url:
-                out.append(url)
-
-        # Only accept if we actually found at least one
-        if out:
-            # Ensure length 2 for flipping convenience (duplicate if only one found)
-            if len(out) == 1:
-                out.append(out[0])
-            return out
-
-    # Single-faced cards
-    iu = card.get("image_uris") or {}
-    url = (
-        iu.get("art_crop")
-        or iu.get("border_crop")
+    if not isinstance(iu, dict):
+        return ""
+    if prefer_art_crop:
+        return (
+            iu.get("art_crop")
+            or iu.get("border_crop")
+            or iu.get("normal")
+            or iu.get("large")
+            or iu.get("png")
+            or ""
+        )
+    return (
+        iu.get("border_crop")
+        or iu.get("art_crop")
         or iu.get("normal")
         or iu.get("large")
         or iu.get("png")
+        or ""
     )
-    if url:
-        return [url]
 
-    return []
+def _extract_faces_always_two(card: dict) -> list[str]:
+    """
+    Returns exactly two URLs:
+      - DFC: [face0_border_crop, face1_border_crop]
+      - single-faced: [front_art_crop, CARD_BACK_URL]
+    """
+    faces = card.get("card_faces") or []
+    if isinstance(faces, list) and len(faces) >= 2:
+        iu0 = (faces[0] or {}).get("image_uris") or {}
+        iu1 = (faces[1] or {}).get("image_uris") or {}
+
+        u0 = _pick_image(iu0, prefer_art_crop=False)
+        u1 = _pick_image(iu1, prefer_art_crop=False)
+
+        if not u0:
+            # fall back to single-faced logic if face images are missing
+            pass
+        else:
+            if not u1:
+                u1 = u0
+            return [u0, u1]
+
+    # single-faced
+    iu = card.get("image_uris") or {}
+    front = _pick_image(iu, prefer_art_crop=True)
+    if not front:
+        return []
+    return [front, CARD_BACK_URL]
 
 def _extract_border_crop(card: dict) -> str:
-    """
-    Old behavior retained (border_crop of first available face).
-    """
-    iu = card.get("image_uris") or {}
-    border_crop = iu.get("border_crop")
+    # Old behavior retained (border_crop of first available face)
+    border_crop = (card.get("image_uris") or {}).get("border_crop")
     if border_crop:
         return border_crop
 
@@ -119,7 +129,7 @@ def api_current():
         return jsonify({
             "last_query": _state["last_query"],
             "card_id": _state["card_id"],
-            "faces": _state["faces"],
+            "faces": _state["faces"],  # ALWAYS two when present
             # backward compat:
             "border_crop_url": _state["border_crop_url"],
         })
@@ -136,7 +146,7 @@ def api_search():
         url = f"https://api.scryfall.com/cards/named?{params}"
         card = _scryfall_get(url)
 
-        faces = _extract_faces(card)
+        faces = _extract_faces_always_two(card)
         if not faces:
             return jsonify({"error": "No suitable image found for this card"}), 422
 
@@ -184,7 +194,7 @@ def api_random():
         url = "https://api.scryfall.com/cards/random?" + urllib.parse.urlencode({"q": q})
         card = _scryfall_get(url)
 
-        faces = _extract_faces(card)
+        faces = _extract_faces_always_two(card)
         if not faces:
             return jsonify({"error": "No suitable image found for this random card"}), 422
 
