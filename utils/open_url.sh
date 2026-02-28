@@ -16,4 +16,4 @@ exec /usr/bin/chromium-browser \
   --disable-gpu \
   --disable-software-rasterizer \
   --use-gl=swiftshader \
-  "$URL"
+  "$URL" >/dev/null 2>&1
