@@ -20,43 +20,73 @@
         background: var(--bg);
       }
 
-      /* Layers for overlays (counters/text/QR/etc) */
-      .layer {
-        position: absolute;
-        inset: 0;
-      }
-
-      /* Card image base behavior: top-left anchored, fit without cropping */
-      #card {
+      /* Card wrap is the transform target (rotate affects image + its overlays together) */
+      #cardWrap {
         position: absolute;
         top: 0;
         left: 0;
 
-        max-width: 100vw;
-        max-height: 100vh;
-        width: auto;
-        height: auto;
-
-        object-fit: contain;
-        display: block;
+        /* Set dynamically to the fitted card size */
+        width: 100vw;
+        height: 100vh;
 
         transform-origin: top left;
-        transform: none; /* default: no rotation */
+        transform: none;
       }
 
-      /* Manual rotation */
-      html.rotate #card {
+      html.rotate #cardWrap {
         transform: rotate(90deg) translateY(-100%);
-        max-width: 100vh;
-        max-height: 100vw;
       }
 
-      .overlay {
+      /* The card image fills the wrap */
+      #card {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: fill; /* wrap already matches desired aspect */
+        display: block;
+      }
+
+      /* Rotated overlay layer (counters/arrows/etc). This rotates with cardWrap. */
+      .cardOverlay {
+        position: absolute;
+        inset: 0;
+        z-index: 5;
         pointer-events: none;
-        z-index: 10;
       }
 
-      /* QR badge (TOP-LEFT) */
+      /* Arrows anchored to card edges, 1/3 down the CARD (not viewport) */
+      .nav {
+        position: absolute;
+        top: 33.333%;
+        transform: translateY(-50%);
+        width: 64px;
+        height: 64px;
+
+        display: grid;
+        place-items: center;
+
+        color: rgba(255,255,255,0.9);
+        background: rgba(0,0,0,0.35);
+        border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 999px;
+
+        font: 44px/1 sans-serif;
+        user-select: none;
+      }
+
+      .nav-left { left: 12px; }
+      .nav-right { right: 12px; }
+
+      /* Screen overlay (NOT rotated): QR lives here */
+      .screenOverlay {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        pointer-events: none;
+      }
+
       .qr {
         position: absolute;
         top: 12px;
@@ -84,66 +114,62 @@
         word-break: break-word;
         opacity: 0.95;
       }
-
-      /* Navigation arrows (overlay, 1/3 down the viewport) */
-      .nav {
-        position: absolute;
-        top: 33.333vh;           /* one third down the screen */
-        transform: translateY(-50%);
-        width: 64px;
-        height: 64px;
-
-        display: grid;
-        place-items: center;
-
-        color: rgba(255,255,255,0.85);
-        background: rgba(0,0,0,0.35);
-        border: 1px solid rgba(255,255,255,0.18);
-        border-radius: 999px;
-
-        font: 44px/1 sans-serif;
-        user-select: none;
-      }
-
-      .nav-left { left: 12px; }
-      .nav-right { right: 12px; }
     </style>
   </head>
 
   <body>
     <div class="stage">
-      <div class="layer card-layer">
+      <div id="cardWrap">
         <img id="card" alt="" />
+
+        <!-- This overlay rotates with the card -->
+        <div class="cardOverlay">
+          <div class="nav nav-left" aria-hidden="true">‹</div>
+          <div class="nav nav-right" aria-hidden="true">›</div>
+        </div>
       </div>
 
-      <div class="layer overlay">
+      <!-- This overlay does NOT rotate -->
+      <div class="screenOverlay">
         <div id="qrWrap" class="qr" hidden>
           <canvas id="qr" width="140" height="140"></canvas>
           <div id="qrLabel" class="label"></div>
         </div>
-
-        <!-- One third down the screen, anchored to edges -->
-        <div class="nav nav-left" aria-hidden="true">‹</div>
-        <div class="nav nav-right" aria-hidden="true">›</div>
       </div>
     </div>
 
     <script>
       function getRotateOverride() {
         const p = new URLSearchParams(window.location.search);
-        if (!p.has("rotate")) return null;
+        if (!p.has("rotate")) return false;
 
         const v = (p.get("rotate") || "").trim().toLowerCase();
-        if (["1", "true", "yes", "on"].includes(v)) return true;
-        if (["0", "false", "no", "off"].includes(v)) return false;
-
-        return null;
+        return ["1", "true", "yes", "on"].includes(v);
       }
 
-      // Manual-only: default is NO rotation unless rotate=1 (etc) is provided
-      const override = getRotateOverride();
-      if (override === true) {
-        document.documentElement.classList.add("rotate");
+      const rotate = getRotateOverride();
+      if (rotate) document.documentElement.classList.add("rotate");
+
+      const cardWrap = document.getElementById("cardWrap");
+      const img = document.getElementById("card");
+
+      function fitCardWrapToViewport(naturalW, naturalH) {
+        if (!naturalW || !naturalH) return;
+
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+
+        // When rotated, the available "unrotated" space for the card content is swapped.
+        // We size the wrap in the card's own coordinate space, then rotate the wrap.
+        const availW = rotate ? vh : vw;
+        const availH = rotate ? vw : vh;
+
+        const scale = Math.min(availW / naturalW, availH / naturalH);
+        const w = Math.floor(naturalW * scale);
+        const h = Math.floor(naturalH * scale);
+
+        cardWrap.style.width = w + "px";
+        cardWrap.style.height = h + "px";
       }
 
       // --- QR code (only shown when there is NO image url) ---
@@ -189,7 +215,6 @@
 
         const baseHost = "raspberrypi.local";
         const url = `${location.protocol}//${baseHost}${location.port ? ":" + location.port : ""}/config`;
-
         label.textContent = url;
 
         try {
@@ -207,8 +232,6 @@
         document.getElementById("qrWrap").hidden = true;
       }
 
-      // --- image polling ---
-      const img = document.getElementById("card");
       let lastUrl = null;
 
       async function poll() {
@@ -240,6 +263,16 @@
           // keep last state
         }
       }
+
+      // When image loads, size wrap to match rendered card so overlays anchor to the card
+      img.addEventListener("load", () => {
+        fitCardWrapToViewport(img.naturalWidth, img.naturalHeight);
+      });
+
+      // On resize, refit to viewport using last known natural size
+      window.addEventListener("resize", () => {
+        fitCardWrapToViewport(img.naturalWidth, img.naturalHeight);
+      });
 
       poll();
       setInterval(poll, 1000);
