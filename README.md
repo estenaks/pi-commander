@@ -49,7 +49,9 @@ The webserver is now running. It can be reached via browser or by curl:
 curl -I http://127.0.0.1:8000/face
 ```
 
-You should see an HTTP status 200,
+You should see an HTTP status 200.
+
+Visiting /face before /config shows a qr code to visit /config (no cards load before config is loaded)
 
 ---
 
