@@ -15,6 +15,7 @@ _state = {
     "last_query": None,
     "card_id": None,
     "faces": [],  # always length 2 when a card is loaded
+    "is_planeswalker": False,
     # Backward compat for older frontends:
     "border_crop_url": None,
 }
@@ -97,6 +98,26 @@ def _extract_border_crop(card: dict) -> str:
 
     return ""
 
+def _is_planeswalker(card: dict) -> bool:
+    """
+    True if the card is (or has a face that is) a Planeswalker.
+    Works for single-faced cards and DFCs by checking type_line(s).
+    """
+    type_lines = []
+
+    tl = card.get("type_line")
+    if isinstance(tl, str):
+        type_lines.append(tl)
+
+    faces = card.get("card_faces") or []
+    if isinstance(faces, list):
+        for face in faces:
+            ftl = (face or {}).get("type_line")
+            if isinstance(ftl, str):
+                type_lines.append(ftl)
+
+    return any("Planeswalker" in t for t in type_lines)
+
 @app.get("/")
 def index():
     return render_template("index.html")
@@ -116,6 +137,7 @@ def api_current():
             "last_query": _state["last_query"],
             "card_id": _state["card_id"],
             "faces": _state["faces"],  # ALWAYS two when present
+            "is_planeswalker": _state["is_planeswalker"],
             # backward compat:
             "border_crop_url": _state["border_crop_url"],
         })
@@ -137,11 +159,13 @@ def api_search():
             return jsonify({"error": "No suitable image found for this card"}), 422
 
         border_crop = _extract_border_crop(card) or faces[0]
+        is_pw = _is_planeswalker(card)
 
         with _state_lock:
             _state["last_query"] = query
             _state["card_id"] = card.get("id")
             _state["faces"] = faces
+            _state["is_planeswalker"] = is_pw
             _state["border_crop_url"] = border_crop
 
         return jsonify({
@@ -150,6 +174,7 @@ def api_search():
             "name": card.get("name"),
             "card_id": card.get("id"),
             "faces": faces,
+            "is_planeswalker": is_pw,
             "border_crop_url": border_crop,
             "scryfall_uri": card.get("scryfall_uri"),
         })
@@ -185,11 +210,13 @@ def api_random():
             return jsonify({"error": "No suitable image found for this random card"}), 422
 
         border_crop = _extract_border_crop(card) or faces[0]
+        is_pw = _is_planeswalker(card)
 
         with _state_lock:
             _state["last_query"] = q
             _state["card_id"] = card.get("id")
             _state["faces"] = faces
+            _state["is_planeswalker"] = is_pw
             _state["border_crop_url"] = border_crop
 
         return jsonify({
@@ -199,6 +226,7 @@ def api_random():
             "name": card.get("name"),
             "card_id": card.get("id"),
             "faces": faces,
+            "is_planeswalker": is_pw,
             "border_crop_url": border_crop,
             "scryfall_uri": card.get("scryfall_uri"),
         })
