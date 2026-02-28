@@ -24,20 +24,15 @@
         background: var(--bg);
       }
 
-      /* Card wrap is the transform target (rotate affects image + its overlays together) */
       #cardWrap {
         position: absolute;
         top: 0;
         left: 0;
-
-        /* Set dynamically to the fitted card size */
         width: 100vw;
         height: 100vh;
-
         transform-origin: top left;
         transform: none;
-
-        overflow: hidden; /* required for punch-in crop */
+        overflow: hidden;
       }
 
       html.rotate #cardWrap {
@@ -47,12 +42,10 @@
       #card {
         position: absolute;
         inset: 0;
-
         width: 100%;
         height: 100%;
-        object-fit: fill; /* wrap is sized to preserve aspect */
+        object-fit: fill;
         display: block;
-
         transform-origin: center center;
         transform: scale(
           calc(1 + (2 * var(--punch-x))),
@@ -60,7 +53,6 @@
         );
       }
 
-      /* Click-capture layer above image (rotates with cardWrap) */
       #clickCatcher {
         position: absolute;
         inset: 0;
@@ -70,32 +62,26 @@
         background: transparent;
       }
 
-      /* Rotated overlay layer (counters/arrows/etc). This rotates with cardWrap. */
       .cardOverlay {
         position: absolute;
         inset: 0;
         z-index: 5;
-        pointer-events: none; /* overlay itself doesn't block; individual controls enable */
+        pointer-events: none;
       }
 
-      /* Shared pill button style */
       .btn {
         height: 64px;
         min-width: 64px;
         padding: 0 18px;
-
         display: inline-grid;
         place-items: center;
-
         color: rgba(255,255,255,0.92);
         background: rgba(0,0,0,0.35);
         border: 1px solid rgba(255,255,255,0.18);
         border-radius: 999px;
-
         font: 44px/1 sans-serif;
         user-select: none;
-
-        pointer-events: auto; /* clickable */
+        pointer-events: auto;
       }
 
       .btn.smallText {
@@ -104,7 +90,6 @@
         letter-spacing: 0.5px;
       }
 
-      /* Plus/minus a bit smaller (~25%) */
       .btn.pm {
         height: 48px;
         min-width: 48px;
@@ -112,21 +97,17 @@
         font-size: 32px;
       }
 
-      /* Hard force: if hidden attribute is present, it must not render */
       #countBtn[hidden] { display: none !important; }
 
-      /* Counter cluster anchored to card edges, 1/3 down the CARD (not viewport) */
       .counterBar {
         position: absolute;
         top: 33.333%;
-        left: 0;     /* flush to card edge */
-        right: 0;    /* flush to card edge */
+        left: 0;
+        right: 0;
         transform: translateY(-50%);
-
         display: flex;
         align-items: center;
         justify-content: space-between;
-
         padding: 0;
       }
 
@@ -137,7 +118,6 @@
         padding: 0 12px;
       }
 
-      /* Screen overlay (NOT rotated): QR lives here */
       .screenOverlay {
         position: absolute;
         inset: 0;
@@ -181,7 +161,6 @@
         <img id="card" alt="" />
         <div id="clickCatcher" title="Tap to flip"></div>
 
-        <!-- This overlay rotates with the card -->
         <div class="cardOverlay">
           <div class="counterBar">
             <div id="minusBtn" class="btn pm" role="button" tabindex="0" aria-label="Decrement">−</div>
@@ -195,7 +174,6 @@
         </div>
       </div>
 
-      <!-- This overlay does NOT rotate -->
       <div class="screenOverlay">
         <div id="qrWrap" class="qr" hidden>
           <canvas id="qr" width="140" height="140"></canvas>
@@ -256,13 +234,11 @@
         countBtn.hidden = false;
         countBtn.setAttribute("aria-hidden", "false");
 
-        // If planeswalker: show just the loyalty number (no +x/+x)
         if (isPlaneswalker) {
           countBtn.textContent = String(counter);
           return;
         }
 
-        // Otherwise: +1/+1 style
         if (counter > 0) {
           countBtn.textContent = `+${counter}/+${counter}`;
         } else {
@@ -349,7 +325,7 @@
 
       // --- Face flipping driven by /api/current `faces` ---
       let lastCardId = null;
-      let faces = []; // array of 2 URLs (front/back) from server
+      let faces = [];
       let faceIndex = 0;
 
       function cacheBust(url) {
@@ -368,8 +344,6 @@
         if (cardId && cardId !== lastCardId) {
           lastCardId = cardId;
           faceIndex = 0;
-          // Keep counter value, but re-render formatting for new card type
-          renderCounter();
         }
       }
 
@@ -382,32 +356,13 @@
 
       let lastRenderedUrl = null;
 
-      function getTypeLinesFromApiPayload(data) {
-        // If your backend later passes scryfall fields through, support both styles:
-        // - type_line (single)
-        // - card_faces[].type_line (DFC)
-        const out = [];
-
-        if (data && Array.isArray(data.card_faces)) {
-          for (const f of data.card_faces) {
-            if (f && typeof f.type_line === "string") out.push(f.type_line);
-          }
-        }
-
-        if (data && typeof data.type_line === "string") {
-          out.push(data.type_line);
-        }
-
-        return out;
-      }
-
       async function poll() {
         try {
           const r = await fetch("/api/current", { cache: "no-store" });
           const data = await r.json();
 
           const nextFaces = Array.isArray(data.faces) ? data.faces.filter(Boolean) : [];
-          const cardId = data.card_id || data.id || null;
+          const cardId = data.card_id || null;
 
           if (nextFaces.length === 0) {
             if (lastRenderedUrl !== "") {
@@ -425,11 +380,14 @@
           faces = nextFaces;
           faceIndex = Math.min(faceIndex, faces.length - 1);
 
-          // Planeswalker detection:
-          // This requires backend to include type_line / card_faces[].type_line in /api/current
-          // (or you can add a boolean like "is_planeswalker").
-          const typeLines = getTypeLinesFromApiPayload(data);
-          isPlaneswalker = typeLines.some(t => t.includes("Planeswalker"));
+          // Prefer backend boolean, but also support deriving from type_line if it exists in payload.
+          if (typeof data.is_planeswalker === "boolean") {
+            isPlaneswalker = data.is_planeswalker;
+          } else if (typeof data.type_line === "string") {
+            isPlaneswalker = data.type_line.includes("Planeswalker");
+          } else {
+            isPlaneswalker = false;
+          }
           renderCounter();
 
           const displayUrl = faces[faceIndex] || faces[0];
