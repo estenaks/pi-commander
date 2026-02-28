@@ -20,7 +20,7 @@
         background: var(--bg);
       }
 
-      /* Layers for future overlays (counters/text/etc) */
+      /* Layers for overlays (counters/text/QR/etc) */
       .layer {
         position: absolute;
         inset: 0;
@@ -44,7 +44,7 @@
         transform: none; /* default: no rotation */
       }
 
-      /* Rotation class (manual override only) */
+      /* Manual rotation */
       html.rotate #card {
         transform: rotate(90deg) translateY(-100%);
         max-width: 100vh;
@@ -54,6 +54,35 @@
       .overlay {
         pointer-events: none;
         z-index: 10;
+      }
+
+      /* QR badge */
+      .qr {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        background: rgba(0,0,0,0.55);
+        border: 1px solid rgba(255,255,255,0.25);
+        padding: 10px;
+        border-radius: 8px;
+        backdrop-filter: blur(2px);
+      }
+
+      .qr canvas {
+        width: 140px;
+        height: 140px;
+        image-rendering: pixelated;
+        display: block;
+        background: #fff;
+      }
+
+      .qr .label {
+        margin-top: 8px;
+        color: #fff;
+        font: 12px/1.2 sans-serif;
+        max-width: 160px;
+        word-break: break-word;
+        opacity: 0.95;
       }
     </style>
   </head>
@@ -65,31 +94,103 @@
       </div>
 
       <div class="layer overlay">
-        <!-- Future counters/text go here -->
+        <div id="qrWrap" class="qr" hidden>
+          <canvas id="qr" width="140" height="140"></canvas>
+          <div id="qrLabel" class="label"></div>
+        </div>
       </div>
     </div>
 
     <script>
       function getRotateOverride() {
         const p = new URLSearchParams(window.location.search);
-
-        // /face?rotate=1  (or true/yes/on) => rotate
-        // /face?rotate=0  (or false/no/off) => do not rotate
         if (!p.has("rotate")) return null;
-
         const v = (p.get("rotate") || "").trim().toLowerCase();
         if (["1", "true", "yes", "on"].includes(v)) return true;
         if (["0", "false", "no", "off"].includes(v)) return false;
-
         return null;
+      }
+
+      function shouldShowQr() {
+        const p = new URLSearchParams(window.location.search);
+        if (!p.has("qr")) return true; // default ON
+        const v = (p.get("qr") || "").trim().toLowerCase();
+        if (["0", "false", "no", "off"].includes(v)) return false;
+        return true;
       }
 
       // Manual-only: default is NO rotation unless rotate=1 (etc) is provided
       const override = getRotateOverride();
-      if (override === true) {
-        document.documentElement.classList.add("rotate");
+      if (override === true) document.documentElement.classList.add("rotate");
+
+      // --- QR code overlay (client-side, no server deps) ---
+      // We use a lightweight QR generator from a CDN.
+      async function loadQrLib() {
+        // qrcode-generator (small, no DOM dependencies)
+        const src = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
+        await new Promise((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = src;
+          s.onload = resolve;
+          s.onerror = () => reject(new Error("Failed to load QR library"));
+          document.head.appendChild(s);
+        });
       }
 
+      function drawQrToCanvas(text, canvas) {
+        // qrcode(typeNumber, errorCorrectionLevel)
+        const qr = window.qrcode(0, "M");
+        qr.addData(text);
+        qr.make();
+
+        const ctx = canvas.getContext("2d");
+        const count = qr.getModuleCount();
+        const size = canvas.width;
+        const scale = Math.floor(size / count);
+        const offset = Math.floor((size - count * scale) / 2);
+
+        // background
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, size, size);
+
+        // modules
+        ctx.fillStyle = "#000";
+        for (let r = 0; r < count; r++) {
+          for (let c = 0; c < count; c++) {
+            if (qr.isDark(r, c)) {
+              ctx.fillRect(offset + c * scale, offset + r * scale, scale, scale);
+            }
+          }
+        }
+      }
+
+      async function initQr() {
+        if (!shouldShowQr()) return;
+
+        const wrap = document.getElementById("qrWrap");
+        const canvas = document.getElementById("qr");
+        const label = document.getElementById("qrLabel");
+
+        // Prefer raspberrypi.local, otherwise use current host
+        const baseHost = "raspberrypi.local";
+        const url = `${location.protocol}//${baseHost}${location.port ? ":" + location.port : ""}/config`;
+
+        label.textContent = url;
+
+        try {
+          await loadQrLib();
+          drawQrToCanvas(url, canvas);
+          wrap.hidden = false;
+        } catch (e) {
+          // If CDN fails, show the URL text only
+          wrap.hidden = false;
+          canvas.style.display = "none";
+        }
+      }
+
+      initQr();
+
+      // --- image polling ---
       const img = document.getElementById("card");
       let lastUrl = null;
 
