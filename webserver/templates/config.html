@@ -23,7 +23,7 @@
     <div class="row">
       <input id="q" type="text" placeholder='Search card name (fuzzy), e.g. "norin the wary"' />
       <button id="searchBtn">Search</button>
-      <button id="randomBtn">Get random (legendary creature)</button>
+      <button id="randomBtn">Get random commander</button>
     </div>
 
     <fieldset>
@@ -40,7 +40,7 @@
       <label><input type="checkbox" class="ci" value="g"> Green</label>
 
       <div class="muted">
-        “Exactly” means the random card’s color identity must be equal to the checked set (e.g. only {R} or exactly {U,B}, etc).
+        “Exactly” means the random commander's color identity must be equal to the checked set (e.g. only {R} or exactly {U,B}, etc).
         If nothing is checked, random is any color identity.
       </div>
     </fieldset>
@@ -76,18 +76,7 @@
       function selectedColors() {
         return Array.from(document.querySelectorAll("input.ci:checked"))
           .map(cb => cb.value)
-          .sort(); // stable order: b,g,r,u,w (alphabetical) but consistent
-      }
-
-      function exactIdentityQueryFragment(colors) {
-        // Scryfall exact color identity uses "id=<colors>" plus a comparator.
-        // We implement "exactly these colors" via:
-        //  - if colors empty: no id filter
-        //  - else: "id=<colors> -id> <colors> ???"
-        //
-        // Practically: Scryfall supports "id:" with comparators like "=" for exact match in many contexts.
-        // We'll send colors to server and let server build the correct "q".
-        return colors.length ? `id=${colors.join("")}` : "";
+          .sort(); // stable order
       }
 
       async function doSearch(query) {
@@ -104,26 +93,26 @@
         previewEl.src = data.border_crop_url;
       }
 
-      async function doRandom() {
+      async function doRandomCommander() {
         const colors = selectedColors();
         const label = colors.length ? ` (exact id=${colors.join("")})` : "";
-        setBusy(`Getting random legendary creature${label}...`);
+        setBusy(`Getting random commander${label}...`);
 
-        // Server is responsible for interpreting "exactly" (not superset/subset)
-        const { r, data } = await postJson("/api/random", { colors, identity_match: "exact" });
+        // Backend should interpret: "random COMMANDER in given colors"
+        // We keep sending identity_match so backend can support other modes later.
+        const { r, data } = await postJson("/api/random", { colors, identity_match: "exact", mode: "commander" });
 
         jsonEl.textContent = JSON.stringify(data, null, 2);
         if (!r.ok) { statusEl.textContent = "Error (see JSON below)"; return; }
 
-        statusEl.textContent = `Now showing (random): ${data.name}`;
+        statusEl.textContent = `Now showing (random commander): ${data.name}`;
         previewEl.src = data.border_crop_url;
       }
 
       document.getElementById("searchBtn").addEventListener("click", () => doSearch(qEl.value));
-      document.getElementById("randomBtn").addEventListener("click", () => doRandom());
+      document.getElementById("randomBtn").addEventListener("click", () => doRandomCommander());
       qEl.addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(qEl.value); });
 
-      // Always default to Norin on page load
       qEl.value = DEFAULT_QUERY;
       doSearch(DEFAULT_QUERY);
     </script>
