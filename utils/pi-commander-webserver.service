@@ -1,0 +1,23 @@
+[Unit]
+Description=pi-commander webserver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/pi-commander/webserver
+#^ this needs changing if not installed in ~, see README.md
+
+Environment=PYTHONUNBUFFERED=1
+Environment=HOST=127.0.0.1
+Environment=PORT=8000
+
+# Start the app (adjust if needed as commented above)
+ExecStart=/home/pi/pi-commander/webserver/.venv/bin/python /home/pi/pi-commander/webserver/app.py
+
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

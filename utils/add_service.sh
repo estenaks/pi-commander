@@ -1,0 +1,1 @@
+sudo cat /home/pi/pi-commander/utils/pi-commander-webserver.service > /etc/systemd/system/pi-commander-webserver.service 
