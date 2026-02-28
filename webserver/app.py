@@ -42,29 +42,18 @@ def _scryfall_get(url: str) -> dict:
     except Exception as e:
         raise RuntimeError(f"Scryfall request failed: {type(e).__name__}: {e}") from e
 
-def _pick_image(iu: dict, *, prefer_art_crop: bool) -> str:
+def _pick_image_border_crop_only(iu: dict) -> str:
     """
-    prefer_art_crop:
-      - True for single-faced cards (per your earlier request)
-      - False for faces of DFCs (use border_crop)
+    Always use border_crop (never art_crop). Fallbacks are only used if border_crop is missing.
     """
     if not isinstance(iu, dict):
         return ""
-    if prefer_art_crop:
-        return (
-            iu.get("art_crop")
-            or iu.get("border_crop")
-            or iu.get("normal")
-            or iu.get("large")
-            or iu.get("png")
-            or ""
-        )
     return (
         iu.get("border_crop")
-        or iu.get("art_crop")
         or iu.get("normal")
         or iu.get("large")
         or iu.get("png")
+        or iu.get("art_crop")  # last resort
         or ""
     )
 
@@ -72,27 +61,24 @@ def _extract_faces_always_two(card: dict) -> list[str]:
     """
     Returns exactly two URLs:
       - DFC: [face0_border_crop, face1_border_crop]
-      - single-faced: [front_art_crop, CARD_BACK_URL]
+      - single-faced: [front_border_crop, CARD_BACK_URL]
     """
     faces = card.get("card_faces") or []
     if isinstance(faces, list) and len(faces) >= 2:
         iu0 = (faces[0] or {}).get("image_uris") or {}
         iu1 = (faces[1] or {}).get("image_uris") or {}
 
-        u0 = _pick_image(iu0, prefer_art_crop=False)
-        u1 = _pick_image(iu1, prefer_art_crop=False)
+        u0 = _pick_image_border_crop_only(iu0)
+        u1 = _pick_image_border_crop_only(iu1)
 
-        if not u0:
-            # fall back to single-faced logic if face images are missing
-            pass
-        else:
+        if u0:
             if not u1:
                 u1 = u0
             return [u0, u1]
 
     # single-faced
     iu = card.get("image_uris") or {}
-    front = _pick_image(iu, prefer_art_crop=True)
+    front = _pick_image_border_crop_only(iu)
     if not front:
         return []
     return [front, CARD_BACK_URL]
