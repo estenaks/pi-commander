@@ -178,6 +178,7 @@
 
     <script>
       const DEFAULT_QUERY = "norin the wary";
+      const QR_HOST = "raspberrypi.local"; // IMPORTANT: resolves on other devices
 
       const playerEl = document.getElementById("player");
       const qEl = document.getElementById("q");
@@ -217,6 +218,13 @@
       function playerPath(p) {
         if (p === 1) return "/face";
         return `/player${p}`;
+      }
+
+      function externalBaseUrl() {
+        // Keep current protocol (http vs https) + current port if present
+        const proto = location.protocol || "http:";
+        const port = location.port ? `:${location.port}` : "";
+        return `${proto}//${QR_HOST}${port}`;
       }
 
       // --- QR code helpers ---
@@ -263,7 +271,7 @@
 
       async function renderPlayerQr() {
         const p = playerNum();
-        const url = `${location.protocol}//${location.host}${playerPath(p)}`;
+        const url = `${externalBaseUrl()}${playerPath(p)}`;
 
         qrLabelEl.textContent = url;
 
@@ -272,7 +280,6 @@
           drawQrToCanvas(url, qrCanvas);
           qrCanvas.style.display = "block";
         } catch (e) {
-          // If CDN fails, at least show the URL text.
           const ctx = qrCanvas.getContext("2d");
           ctx.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
           qrCanvas.style.display = "none";

@@ -46,7 +46,6 @@
       }
       .counterCenter { flex:1; display:flex; justify-content:center; padding:0 12px; }
 
-      /* Screen overlay (NOT rotated): QR lives here */
       .screenOverlay {
         position: absolute;
         inset: 0;
@@ -92,7 +91,6 @@
         {% include "_face_overlay.html" %}
       </div>
 
-      <!-- This overlay does NOT rotate -->
       <div class="screenOverlay">
         <div id="qrWrap" class="qr" hidden>
           <canvas id="qr" width="140" height="140"></canvas>
@@ -103,6 +101,7 @@
 
     <script>
       const PLAYER = {{ player|int }};
+      const QR_HOST = "raspberrypi.local"; // IMPORTANT: resolves on other devices
 
       function getRotateOverride() {
         const p = new URLSearchParams(window.location.search);
@@ -112,6 +111,13 @@
       }
       const rotate = getRotateOverride();
       if (rotate) document.documentElement.classList.add("rotate");
+
+      function externalBaseUrl() {
+        // Keep current protocol + current port, but force hostname to raspberrypi.local
+        const proto = location.protocol || "http:";
+        const port = location.port ? `:${location.port}` : "";
+        return `${proto}//${QR_HOST}${port}`;
+      }
 
       const cardWrap = document.getElementById("cardWrap");
       const img = document.getElementById("card");
@@ -127,7 +133,6 @@
         cardWrap.style.height = Math.floor(naturalH * scale) + "px";
       }
 
-      // Counter state
       let counter = 0;
 
       const minusBtn = document.getElementById("minusBtn");
@@ -168,7 +173,6 @@
       wireButton(minusBtn, dec);
       wireButton(plusBtn, inc);
 
-      // Faces state from API: [{image_url, type_line}, {image_url, type_line}]
       let lastCardId = null;
       let faces = [];
       let faceIndex = 0;
@@ -203,7 +207,6 @@
         showCurrentFace();
       });
 
-      // --- QR code (shown only when no card is set) ---
       async function loadQrLib() {
         const src = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
         await new Promise((resolve, reject) => {
@@ -245,8 +248,7 @@
         const canvas = document.getElementById("qr");
         const label = document.getElementById("qrLabel");
 
-        // Link to /config on same host (phone-friendly)
-        const url = `${location.protocol}//${location.host}/config`;
+        const url = `${externalBaseUrl()}/config`;
         label.textContent = url;
 
         try {
