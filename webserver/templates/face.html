@@ -7,7 +7,8 @@
     <style>
       :root {
         --bg: #000;
-        --punch-x: 0.05; /* crop 5% from left AND right only, without squishing */
+        --punch-x: 0.05; /* crop 5% from left AND right */
+        --punch-y: 0.02; /* add a tiny uniform vertical zoom to counter perceived squish */
       }
 
       html, body {
@@ -44,9 +45,8 @@
       }
 
       /*
-        Punch-in ONLY on X axis WITHOUT distorting:
-        keep card box the same size, but scale the rendered bitmap horizontally.
-        scaleX(1 + 2*p) => crops ~p off each side.
+        Crop mostly on X, but allow a small Y zoom as well (still no distortion of aspect
+        inside the box; this is just a controlled crop).
       */
       #card {
         position: absolute;
@@ -54,11 +54,14 @@
 
         width: 100%;
         height: 100%;
-        object-fit: fill; /* wrap is sized to preserve aspect, so this won't distort */
+        object-fit: fill; /* wrap is sized to preserve aspect */
         display: block;
 
         transform-origin: center center;
-        transform: scaleX(calc(1 + (2 * var(--punch-x))));
+        transform: scale(
+          calc(1 + (2 * var(--punch-x))),
+          calc(1 + (2 * var(--punch-y)))
+        );
       }
 
       /* Rotated overlay layer (counters/arrows/etc). This rotates with cardWrap. */
