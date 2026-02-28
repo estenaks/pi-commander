@@ -211,6 +211,7 @@
       const img = document.getElementById("card");
 
       // Fit strategy: match HEIGHT of the viewport. Width may overflow (cropped).
+      // We also center the wrap horizontally so overflow is cropped equally on both sides.
       function fitCardWrapToViewport(naturalW, naturalH) {
         if (!naturalW || !naturalH) return;
 
@@ -225,10 +226,17 @@
         const scale = availH / naturalH;
 
         const w = Math.ceil(naturalW * scale);
-        const h = Math.ceil(naturalH * scale); // will equal availH (within rounding)
+        const h = Math.ceil(naturalH * scale);
 
         cardWrap.style.width = w + "px";
         cardWrap.style.height = h + "px";
+
+        // Center horizontally within the available (unrotated) viewport space.
+        // For non-rotate, this centers in the real viewport.
+        // For rotate, availW is swapped as above so centering still looks correct after transform.
+        const left = Math.floor((availW - w) / 2);
+        cardWrap.style.left = left + "px";
+        cardWrap.style.top = "0px";
       }
 
       // --- Counter UI ---
