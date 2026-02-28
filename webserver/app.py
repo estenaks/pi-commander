@@ -15,6 +15,7 @@ _state = {
     "last_query": None,
     "card_id": None,
     "faces": [],  # always length 2 when a card is loaded
+    "type_lines": [],  # list of 1 or 2 type_line strings (front/back or just front)
     "is_planeswalker": False,
     # Backward compat for older frontends:
     "border_crop_url": None,
@@ -77,7 +78,6 @@ def _extract_faces_always_two(card: dict) -> list[str]:
                 u1 = u0
             return [u0, u1]
 
-    # single-faced
     iu = card.get("image_uris") or {}
     front = _pick_image_border_crop_only(iu)
     if not front:
@@ -85,7 +85,6 @@ def _extract_faces_always_two(card: dict) -> list[str]:
     return [front, CARD_BACK_URL]
 
 def _extract_border_crop(card: dict) -> str:
-    # Old behavior retained (border_crop of first available face)
     border_crop = (card.get("image_uris") or {}).get("border_crop")
     if border_crop:
         return border_crop
@@ -98,25 +97,34 @@ def _extract_border_crop(card: dict) -> str:
 
     return ""
 
-def _is_planeswalker(card: dict) -> bool:
+def _extract_type_lines(card: dict) -> list[str]:
     """
-    True if the card is (or has a face that is) a Planeswalker.
-    Works for single-faced cards and DFCs by checking type_line(s).
+    Returns a list of 1 or 2 type_line strings.
+    - For DFC/MDFC: returns [face0.type_line, face1.type_line] (if present)
+    - For single-faced: returns [card.type_line] (if present)
     """
-    type_lines = []
+    faces = card.get("card_faces") or []
+    out: list[str] = []
+
+    if isinstance(faces, list) and len(faces) >= 2:
+        for face in faces[:2]:
+            tl = (face or {}).get("type_line")
+            if isinstance(tl, str) and tl.strip():
+                out.append(tl.strip())
+        if out:
+            # Ensure length 2 for convenience (duplicate if needed)
+            if len(out) == 1:
+                out.append(out[0])
+            return out
 
     tl = card.get("type_line")
-    if isinstance(tl, str):
-        type_lines.append(tl)
+    if isinstance(tl, str) and tl.strip():
+        return [tl.strip()]
 
-    faces = card.get("card_faces") or []
-    if isinstance(faces, list):
-        for face in faces:
-            ftl = (face or {}).get("type_line")
-            if isinstance(ftl, str):
-                type_lines.append(ftl)
+    return []
 
-    return any("Planeswalker" in t for t in type_lines)
+def _is_planeswalker_from_type_lines(type_lines: list[str]) -> bool:
+    return any("Planeswalker" in tl for tl in (type_lines or []))
 
 @app.get("/")
 def index():
@@ -137,6 +145,7 @@ def api_current():
             "last_query": _state["last_query"],
             "card_id": _state["card_id"],
             "faces": _state["faces"],  # ALWAYS two when present
+            "type_lines": _state["type_lines"],  # 1 or 2 strings
             "is_planeswalker": _state["is_planeswalker"],
             # backward compat:
             "border_crop_url": _state["border_crop_url"],
@@ -158,13 +167,16 @@ def api_search():
         if not faces:
             return jsonify({"error": "No suitable image found for this card"}), 422
 
+        type_lines = _extract_type_lines(card)
+        is_pw = _is_planeswalker_from_type_lines(type_lines)
+
         border_crop = _extract_border_crop(card) or faces[0]
-        is_pw = _is_planeswalker(card)
 
         with _state_lock:
             _state["last_query"] = query
             _state["card_id"] = card.get("id")
             _state["faces"] = faces
+            _state["type_lines"] = type_lines
             _state["is_planeswalker"] = is_pw
             _state["border_crop_url"] = border_crop
 
@@ -174,6 +186,7 @@ def api_search():
             "name": card.get("name"),
             "card_id": card.get("id"),
             "faces": faces,
+            "type_lines": type_lines,
             "is_planeswalker": is_pw,
             "border_crop_url": border_crop,
             "scryfall_uri": card.get("scryfall_uri"),
@@ -209,13 +222,16 @@ def api_random():
         if not faces:
             return jsonify({"error": "No suitable image found for this random card"}), 422
 
+        type_lines = _extract_type_lines(card)
+        is_pw = _is_planeswalker_from_type_lines(type_lines)
+
         border_crop = _extract_border_crop(card) or faces[0]
-        is_pw = _is_planeswalker(card)
 
         with _state_lock:
             _state["last_query"] = q
             _state["card_id"] = card.get("id")
             _state["faces"] = faces
+            _state["type_lines"] = type_lines
             _state["is_planeswalker"] = is_pw
             _state["border_crop_url"] = border_crop
 
@@ -226,6 +242,7 @@ def api_random():
             "name": card.get("name"),
             "card_id": card.get("id"),
             "faces": faces,
+            "type_lines": type_lines,
             "is_planeswalker": is_pw,
             "border_crop_url": border_crop,
             "scryfall_uri": card.get("scryfall_uri"),
