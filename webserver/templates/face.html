@@ -8,7 +8,7 @@
       :root {
         --bg: #000;
         --punch-x: 0.03; /* crop % from left AND right */
-        --punch-y: 0.03; 
+        --punch-y: 0.03;
       }
 
       html, body {
@@ -44,10 +44,6 @@
         transform: rotate(90deg) translateY(-100%);
       }
 
-      /*
-        Crop mostly on X, but allow a small Y zoom as well (still no distortion of aspect
-        inside the box; this is just a controlled crop).
-      */
       #card {
         position: absolute;
         inset: 0;
@@ -62,6 +58,16 @@
           calc(1 + (2 * var(--punch-x))),
           calc(1 + (2 * var(--punch-y)))
         );
+      }
+
+      /* Click-capture layer above image (rotates with cardWrap) */
+      #clickCatcher {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        cursor: pointer;
+        pointer-events: auto;
+        background: transparent;
       }
 
       /* Rotated overlay layer (counters/arrows/etc). This rotates with cardWrap. */
@@ -173,6 +179,7 @@
     <div class="stage">
       <div id="cardWrap">
         <img id="card" alt="" />
+        <div id="clickCatcher" title="Tap to flip"></div>
 
         <!-- This overlay rotates with the card -->
         <div class="cardOverlay">
@@ -198,6 +205,8 @@
     </div>
 
     <script>
+      const CARD_BACK_URL = "https://files.mtg.wiki/Magic_card_back.jpg";
+
       function getRotateOverride() {
         const p = new URLSearchParams(window.location.search);
         if (!p.has("rotate")) return false;
@@ -211,6 +220,7 @@
 
       const cardWrap = document.getElementById("cardWrap");
       const img = document.getElementById("card");
+      const clickCatcher = document.getElementById("clickCatcher");
 
       function fitCardWrapToViewport(naturalW, naturalH) {
         if (!naturalW || !naturalH) return;
@@ -228,6 +238,75 @@
         cardWrap.style.width = w + "px";
         cardWrap.style.height = h + "px";
       }
+
+      // --- face/flip state ---
+      let lastCardId = null;
+
+      // One-sided: toggles between front art_crop and card back.
+      // Two-sided: toggles between face 0 and face 1 border_crop.
+      let isTwoSided = false;
+      let faceIndex = 0; // 0 or 1 for two-sided
+      let showBackForOneSided = false;
+
+      let oneSidedFrontUrl = null;
+      let twoSidedFaceUrls = [null, null];
+
+      function cacheBust(url) {
+        if (!url) return url;
+        try {
+          const u = new URL(url);
+          u.searchParams.set("_t", Date.now().toString());
+          return u.toString();
+        } catch {
+          // If it's not a valid absolute URL, just append
+          const joiner = url.includes("?") ? "&" : "?";
+          return url + joiner + "_t=" + Date.now().toString();
+        }
+      }
+
+      function setImageUrl(url) {
+        img.src = cacheBust(url);
+      }
+
+      function computeDisplayUrl() {
+        if (isTwoSided) {
+          const u = twoSidedFaceUrls[faceIndex] || oneSidedFrontUrl;
+          return u;
+        }
+        // one-sided
+        return showBackForOneSided ? CARD_BACK_URL : oneSidedFrontUrl;
+      }
+
+      function renderFace() {
+        const url = computeDisplayUrl();
+        if (url) setImageUrl(url);
+      }
+
+      function resetFaceStateForNewCard(cardId, twoSided) {
+        if (cardId && cardId !== lastCardId) {
+          lastCardId = cardId;
+          isTwoSided = twoSided;
+          faceIndex = 0;
+          showBackForOneSided = false;
+        } else {
+          // If we don't have an id, still ensure isTwoSided is up-to-date
+          isTwoSided = twoSided;
+          // If the layout changes between polls, reset the flip state
+          if (twoSided !== isTwoSided) {
+            faceIndex = 0;
+            showBackForOneSided = false;
+          }
+        }
+      }
+
+      clickCatcher.addEventListener("click", () => {
+        if (isTwoSided) {
+          faceIndex = faceIndex === 0 ? 1 : 0;
+        } else {
+          showBackForOneSided = !showBackForOneSided;
+        }
+        renderFace();
+      });
 
       // --- Counter UI ---
       let counter = 0;
@@ -331,14 +410,47 @@
         document.getElementById("qrWrap").hidden = true;
       }
 
+      // --- image polling ---
       let lastUrl = null;
+
+      function getScryfallFrontUrl(data) {
+        // Two-sided (transform/MDFC/etc)
+        if (data && Array.isArray(data.card_faces) && data.card_faces.length >= 2) {
+          const a = data.card_faces[0] && data.card_faces[0].image_uris;
+          const b = data.card_faces[1] && data.card_faces[1].image_uris;
+
+          const u0 = a && (a.border_crop || a.normal || a.large || a.png || a.art_crop);
+          const u1 = b && (b.border_crop || b.normal || b.large || b.png || b.art_crop);
+
+          if (u0 && u1) {
+            return { twoSided: true, id: data.id || null, face0: u0, face1: u1 };
+          }
+        }
+
+        // One-sided
+        const iu = data && data.image_uris;
+        const u = iu && (iu.art_crop || iu.border_crop || iu.normal || iu.large || iu.png);
+        if (u) {
+          return { twoSided: false, id: data.id || null, front: u };
+        }
+
+        // Fallback for your older server payloads that only provided border_crop_url
+        if (data && data.border_crop_url) {
+          return { twoSided: false, id: data.id || null, front: String(data.border_crop_url) };
+        }
+
+        return null;
+      }
 
       async function poll() {
         try {
           const r = await fetch("/api/current", { cache: "no-store" });
           const data = await r.json();
 
-          const url = (data && data.border_crop_url) ? String(data.border_crop_url) : "";
+          const info = getScryfallFrontUrl(data);
+          const url = info
+            ? (info.twoSided ? info.face0 : info.front)
+            : "";
 
           if (!url) {
             if (lastUrl !== "") {
@@ -351,14 +463,30 @@
 
           hideQr();
 
-          if (url !== lastUrl) {
-            lastUrl = url;
-
-            const u = new URL(url);
-            u.searchParams.set("_t", Date.now().toString());
-            img.src = u.toString();
+          // If new card (id changes), reset flip state
+          if (info) {
+            if (info.twoSided) {
+              resetFaceStateForNewCard(info.id, true);
+              twoSidedFaceUrls = [info.face0, info.face1];
+              oneSidedFrontUrl = info.face0; // not used, but keeps fallback sane
+            } else {
+              resetFaceStateForNewCard(info.id, false);
+              oneSidedFrontUrl = info.front;
+              twoSidedFaceUrls = [null, null];
+            }
           }
-        } catch (e) {}
+
+          // Render based on current flip state (this may show back/face1)
+          const displayUrl = computeDisplayUrl();
+
+          // Only set src when display URL changes
+          if (displayUrl !== lastUrl) {
+            lastUrl = displayUrl;
+            renderFace();
+          }
+        } catch (e) {
+          // keep last state
+        }
       }
 
       img.addEventListener("load", () => {
