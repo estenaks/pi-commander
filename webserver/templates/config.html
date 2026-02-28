@@ -1,0 +1,131 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Config</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { font-family: sans-serif; padding: 16px; max-width: 900px; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      input[type="text"] { padding: 10px; font-size: 16px; flex: 1; min-width: 240px; }
+      button { padding: 10px 14px; font-size: 16px; cursor: pointer; }
+      fieldset { margin-top: 12px; padding: 10px 12px; }
+      label { margin-right: 12px; white-space: nowrap; }
+      .status { margin-top: 12px; }
+      img { max-width: 520px; width: 100%; height: auto; display: block; margin-top: 12px; border: 1px solid #ddd; }
+      pre { background: #f4f4f4; padding: 12px; overflow: auto; }
+      .muted { color: #666; font-size: 13px; margin-top: 6px; }
+    </style>
+  </head>
+  <body>
+    <h1>/config</h1>
+
+    <div class="row">
+      <input id="q" type="text" placeholder='Search card name (fuzzy), e.g. "norin the wary"' />
+      <button id="searchBtn">Search</button>
+      <button id="randomBtn">Get random (legendary creature)</button>
+    </div>
+
+    <fieldset>
+      <legend>Random filters</legend>
+
+      <div style="margin-bottom:8px;">
+        <strong>Color identity (exactly):</strong>
+      </div>
+
+      <label><input type="checkbox" class="ci" value="w"> White</label>
+      <label><input type="checkbox" class="ci" value="u"> Blue</label>
+      <label><input type="checkbox" class="ci" value="b"> Black</label>
+      <label><input type="checkbox" class="ci" value="r"> Red</label>
+      <label><input type="checkbox" class="ci" value="g"> Green</label>
+
+      <div class="muted">
+        “Exactly” means the random card’s color identity must be equal to the checked set (e.g. only {R} or exactly {U,B}, etc).
+        If nothing is checked, random is any color identity.
+      </div>
+    </fieldset>
+
+    <div class="status" id="status"></div>
+    <img id="preview" alt="preview" />
+    <pre id="json"></pre>
+
+    <script>
+      const DEFAULT_QUERY = "norin the wary";
+
+      const qEl = document.getElementById("q");
+      const statusEl = document.getElementById("status");
+      const previewEl = document.getElementById("preview");
+      const jsonEl = document.getElementById("json");
+
+      function setBusy(msg) {
+        statusEl.textContent = msg;
+        jsonEl.textContent = "";
+        previewEl.removeAttribute("src");
+      }
+
+      async function postJson(url, body) {
+        const r = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body || {}),
+        });
+        const data = await r.json().catch(() => ({}));
+        return { r, data };
+      }
+
+      function selectedColors() {
+        return Array.from(document.querySelectorAll("input.ci:checked"))
+          .map(cb => cb.value)
+          .sort(); // stable order: b,g,r,u,w (alphabetical) but consistent
+      }
+
+      function exactIdentityQueryFragment(colors) {
+        // Scryfall exact color identity uses "id=<colors>" plus a comparator.
+        // We implement "exactly these colors" via:
+        //  - if colors empty: no id filter
+        //  - else: "id=<colors> -id> <colors> ???"
+        //
+        // Practically: Scryfall supports "id:" with comparators like "=" for exact match in many contexts.
+        // We'll send colors to server and let server build the correct "q".
+        return colors.length ? `id=${colors.join("")}` : "";
+      }
+
+      async function doSearch(query) {
+        const q = (query || "").trim();
+        if (!q) return;
+
+        setBusy(`Searching Scryfall for "${q}"...`);
+        const { r, data } = await postJson("/api/search", { q });
+
+        jsonEl.textContent = JSON.stringify(data, null, 2);
+        if (!r.ok) { statusEl.textContent = "Error (see JSON below)"; return; }
+
+        statusEl.textContent = `Now showing: ${data.name}`;
+        previewEl.src = data.border_crop_url;
+      }
+
+      async function doRandom() {
+        const colors = selectedColors();
+        const label = colors.length ? ` (exact id=${colors.join("")})` : "";
+        setBusy(`Getting random legendary creature${label}...`);
+
+        // Server is responsible for interpreting "exactly" (not superset/subset)
+        const { r, data } = await postJson("/api/random", { colors, identity_match: "exact" });
+
+        jsonEl.textContent = JSON.stringify(data, null, 2);
+        if (!r.ok) { statusEl.textContent = "Error (see JSON below)"; return; }
+
+        statusEl.textContent = `Now showing (random): ${data.name}`;
+        previewEl.src = data.border_crop_url;
+      }
+
+      document.getElementById("searchBtn").addEventListener("click", () => doSearch(qEl.value));
+      document.getElementById("randomBtn").addEventListener("click", () => doRandom());
+      qEl.addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(qEl.value); });
+
+      // Always default to Norin on page load
+      qEl.value = DEFAULT_QUERY;
+      doSearch(DEFAULT_QUERY);
+    </script>
+  </body>
+</html>

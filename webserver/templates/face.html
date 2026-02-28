@@ -1,0 +1,118 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Face</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root { --bg: #000; }
+
+      html, body {
+        height: 100%;
+        margin: 0;
+        background: var(--bg);
+        overflow: hidden;
+      }
+
+      .stage {
+        position: fixed;
+        inset: 0;
+        background: var(--bg);
+      }
+
+      /* Layers for future overlays (counters/text/etc) */
+      .layer {
+        position: absolute;
+        inset: 0;
+      }
+
+      /* Card image base behavior: top-left anchored, fit without cropping */
+      #card {
+        position: absolute;
+        top: 0;
+        left: 0;
+
+        max-width: 100vw;
+        max-height: 100vh;
+        width: auto;
+        height: auto;
+
+        object-fit: contain;
+        display: block;
+
+        transform-origin: top left;
+        transform: none; /* default: no rotation */
+      }
+
+      /* Rotation class (manual override only) */
+      html.rotate #card {
+        transform: rotate(90deg) translateY(-100%);
+        max-width: 100vh;
+        max-height: 100vw;
+      }
+
+      .overlay {
+        pointer-events: none;
+        z-index: 10;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="stage">
+      <div class="layer card-layer">
+        <img id="card" alt="" />
+      </div>
+
+      <div class="layer overlay">
+        <!-- Future counters/text go here -->
+      </div>
+    </div>
+
+    <script>
+      function getRotateOverride() {
+        const p = new URLSearchParams(window.location.search);
+
+        // /face?rotate=1  (or true/yes/on) => rotate
+        // /face?rotate=0  (or false/no/off) => do not rotate
+        if (!p.has("rotate")) return null;
+
+        const v = (p.get("rotate") || "").trim().toLowerCase();
+        if (["1", "true", "yes", "on"].includes(v)) return true;
+        if (["0", "false", "no", "off"].includes(v)) return false;
+
+        return null;
+      }
+
+      // Manual-only: default is NO rotation unless rotate=1 (etc) is provided
+      const override = getRotateOverride();
+      if (override === true) {
+        document.documentElement.classList.add("rotate");
+      }
+
+      const img = document.getElementById("card");
+      let lastUrl = null;
+
+      async function poll() {
+        try {
+          const r = await fetch("/api/current", { cache: "no-store" });
+          const data = await r.json();
+
+          if (data.border_crop_url && data.border_crop_url !== lastUrl) {
+            lastUrl = data.border_crop_url;
+
+            // Bust cache so updates show immediately even if URL repeats
+            const u = new URL(lastUrl);
+            u.searchParams.set("_t", Date.now().toString());
+            img.src = u.toString();
+          }
+        } catch (e) {
+          // silent for now
+        }
+      }
+
+      poll();
+      setInterval(poll, 1000);
+    </script>
+  </body>
+</html>
