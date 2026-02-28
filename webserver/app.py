@@ -8,21 +8,26 @@ import urllib.error
 app = Flask(__name__)
 
 CARD_BACK_URL = "https://files.mtg.wiki/Magic_card_back.jpg"
+PLAYERS = [1, 2, 3, 4]
 
-# Simple in-memory shared state (POC)
 _state_lock = threading.Lock()
-_state = {
-    "last_query": None,
-    "card_id": None,
-    # faces_meta: always length 2 when a card is loaded
-    # [
-    #   {"image_url": "...", "type_line": "..."},
-    #   {"image_url": "...", "type_line": "..."}  # either back face or card back
-    # ]
-    "faces_meta": [],
-    # Backward compat for older frontends:
-    "border_crop_url": None,
+_state_by_player = {
+    p: {
+        "last_query": None,
+        "card_id": None,
+        # always length 2 when set:
+        # [{"image_url": "...", "type_line": "..."}, {"image_url": "...", "type_line": "..."}]
+        "faces_meta": [],
+        # backward compat for older previews:
+        "border_crop_url": None,
+    }
+    for p in PLAYERS
 }
+
+def _require_player(player: int) -> int:
+    if player not in _state_by_player:
+        raise ValueError("Invalid player. Must be 1..4.")
+    return player
 
 def _scryfall_get(url: str) -> dict:
     req = urllib.request.Request(
@@ -48,9 +53,6 @@ def _scryfall_get(url: str) -> dict:
         raise RuntimeError(f"Scryfall request failed: {type(e).__name__}: {e}") from e
 
 def _pick_image_border_crop_only(iu: dict) -> str:
-    """
-    Always use border_crop when possible.
-    """
     if not isinstance(iu, dict):
         return ""
     return (
@@ -63,11 +65,6 @@ def _pick_image_border_crop_only(iu: dict) -> str:
     )
 
 def _extract_faces_meta_always_two(card: dict) -> list[dict]:
-    """
-    Returns exactly 2 face objects:
-      - DFC: [face0(border_crop, type_line), face1(border_crop, type_line)]
-      - single-faced: [front(border_crop, type_line), cardback(CARD_BACK_URL, "Card Back")]
-    """
     # DFC / modal etc
     faces = card.get("card_faces") or []
     if isinstance(faces, list) and len(faces) >= 2:
@@ -104,45 +101,77 @@ def _extract_border_crop(card: dict) -> str:
     border_crop = (card.get("image_uris") or {}).get("border_crop")
     if border_crop:
         return border_crop
-
     faces = card.get("card_faces") or []
     for face in faces:
         bc = (face.get("image_uris") or {}).get("border_crop")
         if bc:
             return bc
-
     return ""
 
+def _set_player_state(player: int, *, last_query: str, card: dict) -> dict:
+    faces_meta = _extract_faces_meta_always_two(card)
+    if not faces_meta:
+        raise RuntimeError("No suitable image found for this card")
+
+    border_crop = _extract_border_crop(card) or faces_meta[0]["image_url"]
+
+    with _state_lock:
+        st = _state_by_player[player]
+        st["last_query"] = last_query
+        st["card_id"] = card.get("id")
+        st["faces_meta"] = faces_meta
+        st["border_crop_url"] = border_crop
+
+        return {
+            "last_query": st["last_query"],
+            "card_id": st["card_id"],
+            "faces": st["faces_meta"],
+            "border_crop_url": st["border_crop_url"],
+        }
+
 @app.get("/")
-def index():
-    return render_template("index.html")
+def root():
+    # /face is the default view
+    return render_template("face.html", player=1)
+
+@app.get("/face")
+def face():
+    return render_template("face.html", player=1)
+
+@app.get("/player2")
+def player2():
+    return render_template("face.html", player=2)
+
+@app.get("/player3")
+def player3():
+    return render_template("face.html", player=3)
+
+@app.get("/player4")
+def player4():
+    return render_template("face.html", player=4)
 
 @app.get("/config")
 def config():
     return render_template("config.html")
 
-@app.get("/face")
-def face():
-    return render_template("face.html")
+# ---- API (per-player) ----
 
-@app.get("/api/current")
-def api_current():
+@app.get("/api/current/<int:player>")
+def api_current_player(player: int):
+    _require_player(player)
     with _state_lock:
-        # Convenience fields for frontend:
-        faces = _state["faces_meta"]
+        st = _state_by_player[player]
         return jsonify({
-            "last_query": _state["last_query"],
-            "card_id": _state["card_id"],
-
-            # New payload: full per-face metadata
-            "faces": faces,
-
-            # Backward compat:
-            "border_crop_url": _state["border_crop_url"],
+            "player": player,
+            "last_query": st["last_query"],
+            "card_id": st["card_id"],
+            "faces": st["faces_meta"],
+            "border_crop_url": st["border_crop_url"],
         })
 
-@app.post("/api/search")
-def api_search():
+@app.post("/api/search/<int:player>")
+def api_search_player(player: int):
+    _require_player(player)
     payload = request.get_json(silent=True) or {}
     query = (payload.get("q") or "").strip()
     if not query:
@@ -153,42 +182,31 @@ def api_search():
         url = f"https://api.scryfall.com/cards/named?{params}"
         card = _scryfall_get(url)
 
-        faces_meta = _extract_faces_meta_always_two(card)
-        if not faces_meta:
-            return jsonify({"error": "No suitable image found for this card"}), 422
-
-        border_crop = _extract_border_crop(card) or faces_meta[0]["image_url"]
-
-        with _state_lock:
-            _state["last_query"] = query
-            _state["card_id"] = card.get("id")
-            _state["faces_meta"] = faces_meta
-            _state["border_crop_url"] = border_crop
-
-        return jsonify({
-            "ok": True,
-            "mode": "search",
-            "name": card.get("name"),
-            "card_id": card.get("id"),
-            "faces": faces_meta,
-            "border_crop_url": border_crop,
-            "scryfall_uri": card.get("scryfall_uri"),
-        })
+        data = _set_player_state(player, last_query=query, card=card)
+        return jsonify({"ok": True, "mode": "search", "player": player, "name": card.get("name"), **data})
     except Exception as e:
         return jsonify({"error": str(e)}), 502
 
-@app.post("/api/random")
-def api_random():
+@app.post("/api/random/<int:player>")
+def api_random_player(player: int):
+    _require_player(player)
     payload = request.get_json(silent=True) or {}
     colors = payload.get("colors") or []
     identity_match = (payload.get("identity_match") or "exact").strip().lower()
+    mode = (payload.get("mode") or "commander").strip().lower()
 
     allowed = {"w", "u", "b", "r", "g"}
     colors = [c.lower() for c in colors if isinstance(c, str)]
     colors = [c for c in colors if c in allowed]
 
     try:
-        q_parts = ["t:legendary", "t:creature"]
+        q_parts = []
+
+        if mode == "commander":
+            q_parts.append("is:commander")
+        else:
+            q_parts.append("t:legendary")
+            q_parts.append("t:creature")
 
         if colors:
             colors_str = "".join(colors)
@@ -201,30 +219,23 @@ def api_random():
         url = "https://api.scryfall.com/cards/random?" + urllib.parse.urlencode({"q": q})
         card = _scryfall_get(url)
 
-        faces_meta = _extract_faces_meta_always_two(card)
-        if not faces_meta:
-            return jsonify({"error": "No suitable image found for this random card"}), 422
-
-        border_crop = _extract_border_crop(card) or faces_meta[0]["image_url"]
-
-        with _state_lock:
-            _state["last_query"] = q
-            _state["card_id"] = card.get("id")
-            _state["faces_meta"] = faces_meta
-            _state["border_crop_url"] = border_crop
-
-        return jsonify({
-            "ok": True,
-            "mode": "random",
-            "query": q,
-            "name": card.get("name"),
-            "card_id": card.get("id"),
-            "faces": faces_meta,
-            "border_crop_url": border_crop,
-            "scryfall_uri": card.get("scryfall_uri"),
-        })
+        data = _set_player_state(player, last_query=q, card=card)
+        return jsonify({"ok": True, "mode": "random", "player": player, "query": q, "name": card.get("name"), **data})
     except Exception as e:
         return jsonify({"error": str(e)}), 502
+
+# Backward-compatible endpoints (player 1)
+@app.get("/api/current")
+def api_current_compat():
+    return api_current_player(1)
+
+@app.post("/api/search")
+def api_search_compat():
+    return api_search_player(1)
+
+@app.post("/api/random")
+def api_random_compat():
+    return api_random_player(1)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=False)
