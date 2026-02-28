@@ -7,13 +7,7 @@
     <style>
       :root {
         --bg: #000;
-
-        /* keep punch vars around (disabled) */
-        --punch-x: 0;
-        --punch-y: 0;
-
-        /* crop bottom 3% (in the image's own orientation) */
-        --crop-bottom: 0.03;
+        --punch-x: 0.05; /* crop 5% from left AND right only */
       }
 
       html, body {
@@ -29,74 +23,51 @@
         background: var(--bg);
       }
 
-      /*
-        #rotator rotates the entire "content plane" (image + UI overlay) when rotate=1.
-        Inside it, #viewport defines the unrotated layout plane we size/position things in.
-      */
-      #rotator {
+      /* Card wrap is the transform target (rotate affects image + its overlays together) */
+      #cardWrap {
         position: absolute;
-        inset: 0;
+        top: 0;
+        left: 0;
+
+        /* Set dynamically to the fitted card size */
+        width: 100vw;
+        height: 100vh;
+
         transform-origin: top left;
         transform: none;
+        overflow: hidden; /* important for punch-in crop */
       }
 
-      html.rotate #rotator {
+      html.rotate #cardWrap {
         transform: rotate(90deg) translateY(-100%);
       }
 
-      #viewport {
-        position: absolute;
-        top: 0;
-        left: 0;
-        overflow: hidden;
-      }
-
-      /* The "layout plane" dimensions */
-      html:not(.rotate) #viewport {
-        width: 100vw;
-        height: 100vh;
-      }
-
-      /* When rotated, the layout plane is swapped (we lay out in a vh x vw plane) */
-      html.rotate #viewport {
-        width: 100vh;
-        height: 100vw;
-      }
-
-      /* Media container: height-fitted and horizontally centered within #viewport */
-      #mediaWrap {
-        position: absolute;
-        top: 0;
-        left: 0; /* JS sets */
-        overflow: hidden; /* crops bottom + side overflow equally */
-      }
-
-      /* Image: scaled in Y so bottom 3% is cropped off */
+      /*
+        Punch-in ONLY on the X axis:
+        - crop ~5% from left and right
+        - keep top/bottom unchanged
+      */
       #card {
         position: absolute;
         top: 0;
-        left: 0;
+        left: calc(-1 * var(--punch-x) * 100%);
 
-        width: 100%;
-        height: calc(100% / (1 - var(--crop-bottom)));
-        object-fit: fill;
+        width: calc(100% * (1 + (2 * var(--punch-x))));
+        height: 100%;
+
+        object-fit: fill; /* wrap already matches desired aspect */
         display: block;
-
-        transform-origin: center center;
-        transform: scale(
-          calc(1 + (2 * var(--punch-x))),
-          calc(1 + (2 * var(--punch-y)))
-        );
       }
 
-      /* UI overlay is viewport-anchored (in the same rotated plane) */
-      #ui {
+      /* Rotated overlay layer (counters/arrows/etc). This rotates with cardWrap. */
+      .cardOverlay {
         position: absolute;
         inset: 0;
-        z-index: 10;
-        pointer-events: none;
+        z-index: 5;
+        pointer-events: none; /* overlay itself doesn't block; individual controls enable */
       }
 
+      /* Shared pill button style */
       .btn {
         height: 64px;
         min-width: 64px;
@@ -113,7 +84,7 @@
         font: 44px/1 sans-serif;
         user-select: none;
 
-        pointer-events: auto;
+        pointer-events: auto; /* clickable */
       }
 
       .btn.smallText {
@@ -122,6 +93,7 @@
         letter-spacing: 0.5px;
       }
 
+      /* Plus/minus a bit smaller (~25%) */
       .btn.pm {
         height: 48px;
         min-width: 48px;
@@ -129,14 +101,15 @@
         font-size: 32px;
       }
 
+      /* Hard force: if hidden attribute is present, it must not render */
       #countBtn[hidden] { display: none !important; }
 
-      /* Counter cluster anchored to the layout plane edges */
+      /* Counter cluster anchored to card edges, 1/3 down the CARD (not viewport) */
       .counterBar {
         position: absolute;
         top: 33.333%;
-        left: 0;
-        right: 0;
+        left: 0;     /* flush to card edge */
+        right: 0;    /* flush to card edge */
         transform: translateY(-50%);
 
         display: flex;
@@ -151,6 +124,14 @@
         display: flex;
         justify-content: center;
         padding: 0 12px;
+      }
+
+      /* Screen overlay (NOT rotated): QR lives here */
+      .screenOverlay {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        pointer-events: none;
       }
 
       .qr {
@@ -185,28 +166,28 @@
 
   <body>
     <div class="stage">
-      <div id="rotator">
-        <div id="viewport">
-          <div id="mediaWrap">
-            <img id="card" alt="" />
-          </div>
+      <div id="cardWrap">
+        <img id="card" alt="" />
 
-          <div id="ui">
-            <div class="counterBar">
-              <div id="minusBtn" class="btn pm" role="button" tabindex="0" aria-label="Decrement">−</div>
+        <!-- This overlay rotates with the card -->
+        <div class="cardOverlay">
+          <div class="counterBar">
+            <div id="minusBtn" class="btn pm" role="button" tabindex="0" aria-label="Decrement">−</div>
 
-              <div class="counterCenter">
-                <div id="countBtn" class="btn smallText" hidden aria-hidden="true"></div>
-              </div>
-
-              <div id="plusBtn" class="btn pm" role="button" tabindex="0" aria-label="Increment">+</div>
+            <div class="counterCenter">
+              <div id="countBtn" class="btn smallText" hidden aria-hidden="true"></div>
             </div>
 
-            <div id="qrWrap" class="qr" hidden>
-              <canvas id="qr" width="140" height="140"></canvas>
-              <div id="qrLabel" class="label"></div>
-            </div>
+            <div id="plusBtn" class="btn pm" role="button" tabindex="0" aria-label="Increment">+</div>
           </div>
+        </div>
+      </div>
+
+      <!-- This overlay does NOT rotate -->
+      <div class="screenOverlay">
+        <div id="qrWrap" class="qr" hidden>
+          <canvas id="qr" width="140" height="140"></canvas>
+          <div id="qrLabel" class="label"></div>
         </div>
       </div>
     </div>
@@ -223,35 +204,24 @@
       const rotate = getRotateOverride();
       if (rotate) document.documentElement.classList.add("rotate");
 
-      const viewport = document.getElementById("viewport");
-      const mediaWrap = document.getElementById("mediaWrap");
+      const cardWrap = document.getElementById("cardWrap");
       const img = document.getElementById("card");
 
-      /*
-        We always "fit by height" of the *layout plane* (#viewport).
-        That means:
-          - rotate=0: layout plane height == window.innerHeight
-          - rotate=1: layout plane height == window.innerWidth  (because plane is width:100vh; height:100vw)
-
-        This is the key: in rotate mode, the height we fit to must be the *viewport width*.
-      */
-      function fitMediaWrap(naturalW, naturalH) {
+      function fitCardWrapToViewport(naturalW, naturalH) {
         if (!naturalW || !naturalH) return;
 
-        const planeW = viewport.clientWidth;
-        const planeH = viewport.clientHeight;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
 
-        // Fit to plane height, allow horizontal overflow
-        const scale = planeH / naturalH;
-        const w = Math.ceil(naturalW * scale);
-        const h = Math.ceil(naturalH * scale);
+        const availW = rotate ? vh : vw;
+        const availH = rotate ? vw : vh;
 
-        mediaWrap.style.width = w + "px";
-        mediaWrap.style.height = h + "px";
+        const scale = Math.min(availW / naturalW, availH / naturalH);
+        const w = Math.floor(naturalW * scale);
+        const h = Math.floor(naturalH * scale);
 
-        // Center horizontally within the plane so overflow crops equally left/right
-        mediaWrap.style.left = Math.floor((planeW - w) / 2) + "px";
-        mediaWrap.style.top = "0px";
+        cardWrap.style.width = w + "px";
+        cardWrap.style.height = h + "px";
       }
 
       // --- Counter UI ---
@@ -386,8 +356,13 @@
         } catch (e) {}
       }
 
-      img.addEventListener("load", () => fitMediaWrap(img.naturalWidth, img.naturalHeight));
-      window.addEventListener("resize", () => fitMediaWrap(img.naturalWidth, img.naturalHeight));
+      img.addEventListener("load", () => {
+        fitCardWrapToViewport(img.naturalWidth, img.naturalHeight);
+      });
+
+      window.addEventListener("resize", () => {
+        fitCardWrapToViewport(img.naturalWidth, img.naturalHeight);
+      });
 
       poll();
       setInterval(poll, 1000);
