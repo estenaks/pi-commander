@@ -1,0 +1,1 @@
+@reboot /bin/bash -lc 'sleep 20; DISPLAY=:0 XDG_RUNTIME_DIR=/run/user/1000 /home/pi/pi-commander/utils/open_url.sh >> /home/pi/open_url.cron.log 2>&1'
