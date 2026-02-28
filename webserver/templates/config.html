@@ -92,6 +92,38 @@
       }
 
       .muted { color: var(--muted); font-size: 13px; margin-top: 6px; }
+
+      .qrBox {
+        margin-top: 12px;
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--panel) 70%, transparent);
+        display: inline-block;
+      }
+
+      .qrRow {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      #qr {
+        width: 140px;
+        height: 140px;
+        image-rendering: pixelated;
+        background: #fff;
+        border-radius: 8px;
+        display: block;
+      }
+
+      .qrLabel {
+        color: var(--muted);
+        font-size: 13px;
+        max-width: 520px;
+        word-break: break-word;
+      }
     </style>
   </head>
   <body>
@@ -108,6 +140,17 @@
       <input id="q" type="text" placeholder='Search card name (fuzzy), e.g. "norin the wary"' />
       <button id="searchBtn">Search</button>
       <button id="randomBtn">Get random commander</button>
+    </div>
+
+    <div class="qrBox" aria-label="QR code for selected player view">
+      <div style="margin-bottom:8px;"><strong>Open on phone</strong></div>
+      <div class="qrRow">
+        <canvas id="qr" width="140" height="140"></canvas>
+        <div>
+          <div class="qrLabel" id="qrLabel"></div>
+          <div class="muted">Scan to open the selected player screen on your phone.</div>
+        </div>
+      </div>
     </div>
 
     <fieldset>
@@ -142,6 +185,9 @@
       const previewEl = document.getElementById("preview");
       const jsonEl = document.getElementById("json");
 
+      const qrCanvas = document.getElementById("qr");
+      const qrLabelEl = document.getElementById("qrLabel");
+
       function setBusy(msg) {
         statusEl.textContent = msg;
         jsonEl.textContent = "";
@@ -168,6 +214,76 @@
         return Number(playerEl.value || "1") || 1;
       }
 
+      function playerPath(p) {
+        if (p === 1) return "/face";
+        return `/player${p}`;
+      }
+
+      // --- QR code helpers ---
+      async function loadQrLib() {
+        const src = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
+        await new Promise((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = src;
+          s.onload = resolve;
+          s.onerror = () => reject(new Error("Failed to load QR library"));
+          document.head.appendChild(s);
+        });
+      }
+
+      function drawQrToCanvas(text, canvas) {
+        const qr = window.qrcode(0, "M");
+        qr.addData(text);
+        qr.make();
+
+        const ctx = canvas.getContext("2d");
+        const count = qr.getModuleCount();
+        const size = canvas.width;
+        const scale = Math.floor(size / count);
+        const offset = Math.floor((size - count * scale) / 2);
+
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, size, size);
+
+        ctx.fillStyle = "#000";
+        for (let r = 0; r < count; r++) {
+          for (let c = 0; c < count; c++) {
+            if (qr.isDark(r, c)) {
+              ctx.fillRect(offset + c * scale, offset + r * scale, scale, scale);
+            }
+          }
+        }
+      }
+
+      let qrLibPromise = null;
+      function ensureQrLib() {
+        if (!qrLibPromise) qrLibPromise = loadQrLib();
+        return qrLibPromise;
+      }
+
+      async function renderPlayerQr() {
+        const p = playerNum();
+        const url = `${location.protocol}//${location.host}${playerPath(p)}`;
+
+        qrLabelEl.textContent = url;
+
+        try {
+          await ensureQrLib();
+          drawQrToCanvas(url, qrCanvas);
+          qrCanvas.style.display = "block";
+        } catch (e) {
+          // If CDN fails, at least show the URL text.
+          const ctx = qrCanvas.getContext("2d");
+          ctx.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
+          qrCanvas.style.display = "none";
+        }
+      }
+
+      playerEl.addEventListener("change", () => {
+        renderPlayerQr();
+      });
+
+      // --- Actions ---
       async function doSearch(query) {
         const q = (query || "").trim();
         if (!q) return;
@@ -207,6 +323,8 @@
       document.getElementById("randomBtn").addEventListener("click", () => doRandomCommander());
       qEl.addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(qEl.value); });
 
+      // initial
+      renderPlayerQr();
       qEl.value = DEFAULT_QUERY;
       doSearch(DEFAULT_QUERY);
     </script>
