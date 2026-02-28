@@ -5,7 +5,10 @@
     <title>Face</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
-      :root { --bg: #000; }
+      :root {
+        --bg: #000;
+        --punch: 0.05; /* 5% zoom/crop to remove black border */
+      }
 
       html, body {
         height: 100%;
@@ -32,18 +35,25 @@
 
         transform-origin: top left;
         transform: none;
+        overflow: hidden; /* important for punch-in crop */
       }
 
       html.rotate #cardWrap {
         transform: rotate(90deg) translateY(-100%);
       }
 
-      /* The card image fills the wrap */
+      /*
+        The card image is slightly zoomed in to crop ~5% off each edge.
+        We also offset it so the zoom stays centered.
+      */
       #card {
         position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
+        top: calc(-1 * var(--punch) * 100%);
+        left: calc(-1 * var(--punch) * 100%);
+
+        width: calc(100% * (1 + (2 * var(--punch))));
+        height: calc(100% * (1 + (2 * var(--punch))));
+
         object-fit: fill; /* wrap already matches desired aspect */
         display: block;
       }
