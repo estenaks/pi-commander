@@ -82,25 +82,36 @@
         letter-spacing: 0.5px;
       }
 
+      /* Plus/minus a bit smaller (~25%) */
+      .btn.pm {
+        height: 48px;
+        min-width: 48px;
+        padding: 0 14px;
+        font-size: 32px;
+      }
+
       /* Counter cluster anchored to card edges, 1/3 down the CARD (not viewport) */
       .counterBar {
         position: absolute;
         top: 33.333%;
-        left: 12px;
-        right: 12px;
+        left: 0;     /* flush to card edge */
+        right: 0;    /* flush to card edge */
         transform: translateY(-50%);
 
         display: flex;
         align-items: center;
         justify-content: space-between;
 
-        gap: 12px;
+        /* No padding here so left/right buttons can be truly flush */
+        padding: 0;
       }
 
+      /* Give only the center some breathing room */
       .counterCenter {
         flex: 1;
         display: flex;
         justify-content: center;
+        padding: 0 12px;
       }
 
       /* Screen overlay (NOT rotated): QR lives here */
@@ -149,13 +160,13 @@
         <!-- This overlay rotates with the card -->
         <div class="cardOverlay">
           <div class="counterBar">
-            <div id="minusBtn" class="btn" role="button" tabindex="0" aria-label="Decrement">−</div>
+            <div id="minusBtn" class="btn pm" role="button" tabindex="0" aria-label="Decrement">−</div>
 
             <div class="counterCenter">
               <div id="countBtn" class="btn smallText" hidden aria-hidden="true"></div>
             </div>
 
-            <div id="plusBtn" class="btn" role="button" tabindex="0" aria-label="Increment">+</div>
+            <div id="plusBtn" class="btn pm" role="button" tabindex="0" aria-label="Increment">+</div>
           </div>
         </div>
       </div>
@@ -190,7 +201,6 @@
         const vw = window.innerWidth;
         const vh = window.innerHeight;
 
-        // When rotated, the available "unrotated" space for the card content is swapped.
         const availW = rotate ? vh : vw;
         const availH = rotate ? vw : vh;
 
@@ -211,6 +221,7 @@
 
       function renderCounter() {
         if (counter === 0) {
+          // Hide completely when zero
           countBtn.hidden = true;
           countBtn.setAttribute("aria-hidden", "true");
           countBtn.textContent = "";
@@ -223,7 +234,6 @@
         if (counter > 0) {
           countBtn.textContent = `+${counter}/+${counter}`;
         } else {
-          // counter is negative; format exactly as requested: "$int/$int"
           countBtn.textContent = `${counter}/${counter}`;
         }
       }
@@ -337,12 +347,10 @@
         }
       }
 
-      // When image loads, size wrap to match rendered card so overlays anchor to the card
       img.addEventListener("load", () => {
         fitCardWrapToViewport(img.naturalWidth, img.naturalHeight);
       });
 
-      // On resize, refit to viewport using last known natural size
       window.addEventListener("resize", () => {
         fitCardWrapToViewport(img.naturalWidth, img.naturalHeight);
       });
