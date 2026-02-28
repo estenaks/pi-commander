@@ -90,6 +90,9 @@
         font-size: 32px;
       }
 
+      /* Hard force: if hidden attribute is present, it must not render */
+      #countBtn[hidden] { display: none !important; }
+
       /* Counter cluster anchored to card edges, 1/3 down the CARD (not viewport) */
       .counterBar {
         position: absolute;
@@ -102,11 +105,9 @@
         align-items: center;
         justify-content: space-between;
 
-        /* No padding here so left/right buttons can be truly flush */
         padding: 0;
       }
 
-      /* Give only the center some breathing room */
       .counterCenter {
         flex: 1;
         display: flex;
@@ -221,7 +222,6 @@
 
       function renderCounter() {
         if (counter === 0) {
-          // Hide completely when zero
           countBtn.hidden = true;
           countBtn.setAttribute("aria-hidden", "true");
           countBtn.textContent = "";
@@ -342,9 +342,7 @@
             u.searchParams.set("_t", Date.now().toString());
             img.src = u.toString();
           }
-        } catch (e) {
-          // keep last state
-        }
+        } catch (e) {}
       }
 
       img.addEventListener("load", () => {
