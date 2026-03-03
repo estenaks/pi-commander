@@ -1,1 +1,19 @@
-.DS_STORE
+.DS_Store
+
+# Python virtual environment
+webserver/.venv/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# pip
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
