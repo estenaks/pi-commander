@@ -1,9 +1,13 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 import urllib.request
 import urllib.parse
 import json
 import threading
 import urllib.error
+import io
+import sys
+
+from PIL import Image
 
 app = Flask(__name__)
 
@@ -23,6 +27,78 @@ _state_by_player = {
     }
     for p in PLAYERS
 }
+
+# BMP cache: keyed by (player, face) where face is "front" or "back"
+# Protected by _state_lock
+_bmp_cache: dict[tuple[int, str], bytes] = {}
+
+
+def _url_to_bmp(url: str) -> bytes:
+    """Fetch an image from *url*, resize so height fills 480 px, centre-crop to
+    320×480, convert to RGB and return raw BMP bytes.
+
+    Pillow's BMP writer produces 24-bit RGB BMP.  True 16-bit RGB565 BMP is not
+    natively supported by Pillow; 24-bit RGB is used here as an acceptable
+    fallback — most display drivers (including MicroPython's framebuf) can handle
+    24-bit BMP or convert on the fly.
+    """
+    with urllib.request.urlopen(url, timeout=15) as resp:
+        data = resp.read()
+    img = Image.open(io.BytesIO(data))
+    # Scale so height == 480, preserving aspect ratio
+    orig_w, orig_h = img.size
+    new_h = 480
+    new_w = max(1, round(orig_w * new_h / orig_h))
+    img = img.resize((new_w, new_h), Image.LANCZOS)
+    # Centre-crop to 320 wide
+    if new_w > 320:
+        left = (new_w - 320) // 2
+        img = img.crop((left, 0, left + 320, 480))
+    elif new_w < 320:
+        # Pad with black on left/right if narrower than 320
+        padded = Image.new("RGB", (320, 480), (0, 0, 0))
+        padded.paste(img, ((320 - new_w) // 2, 0))
+        img = padded
+    img = img.convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="BMP")
+    return buf.getvalue()
+
+
+def _generate_bmps(player: int) -> None:
+    """Generate and cache BMP images for both faces of *player*'s current card.
+
+    Must be called **outside** _state_lock (reads state under lock, then does
+    network I/O, then writes cache under lock).
+    All errors are caught and logged so they never crash the server.
+    """
+    with _state_lock:
+        faces_meta = list(_state_by_player[player]["faces_meta"])
+        card_id = _state_by_player[player]["card_id"]
+
+    if not faces_meta:
+        return
+
+    front_url = faces_meta[0]["image_url"]
+    back_url = faces_meta[1]["image_url"] if len(faces_meta) > 1 else CARD_BACK_URL
+
+    for face, url in (("front", front_url), ("back", back_url)):
+        try:
+            bmp_bytes = _url_to_bmp(url)
+            with _state_lock:
+                # Only cache if the player's card hasn't changed since we started
+                if _state_by_player[player]["card_id"] == card_id:
+                    _bmp_cache[(player, face)] = bmp_bytes
+        except Exception as exc:
+            print(f"[bmp] Error generating {face} BMP for player {player}: {exc}", file=sys.stderr)
+
+
+# Pre-generate the card-back BMP at startup so the fallback is always available.
+_CARD_BACK_BMP: bytes | None = None
+try:
+    _CARD_BACK_BMP = _url_to_bmp(CARD_BACK_URL)
+except Exception as _exc:
+    print(f"[bmp] Warning: could not pre-generate card-back BMP: {_exc}", file=sys.stderr)
 
 def _require_player(player: int) -> int:
     if player not in _state_by_player:
@@ -122,12 +198,17 @@ def _set_player_state(player: int, *, last_query: str, card: dict) -> dict:
         st["faces_meta"] = faces_meta
         st["border_crop_url"] = border_crop
 
-        return {
+        result = {
             "last_query": st["last_query"],
             "card_id": st["card_id"],
             "faces": st["faces_meta"],
             "border_crop_url": st["border_crop_url"],
         }
+
+    # BMP generation happens after state is set (outside lock) so /face etc.
+    # continue to work as before; errors are caught inside _generate_bmps.
+    _generate_bmps(player)
+    return result
 
 @app.get("/")
 def root():
@@ -236,6 +317,55 @@ def api_search_compat():
 @app.post("/api/random")
 def api_random_compat():
     return api_random_player(1)
+
+
+# ---- BMP endpoints ----
+
+def _get_bmp_for_player(player: int, face: str) -> bytes:
+    """Return cached BMP bytes for *player*/*face*, falling back to the card-back BMP."""
+    with _state_lock:
+        bmp = _bmp_cache.get((player, face))
+    if bmp is not None:
+        return bmp
+    if _CARD_BACK_BMP is not None:
+        return _CARD_BACK_BMP
+    # Last-resort: generate card-back on the fly
+    return _url_to_bmp(CARD_BACK_URL)
+
+
+@app.get("/bmp/<int:player>/front")
+def bmp_player_front(player: int):
+    _require_player(player)
+    data = _get_bmp_for_player(player, "front")
+    return send_file(
+        io.BytesIO(data),
+        mimetype="image/bmp",
+        as_attachment=True,
+        download_name=f"player{player}_front.bmp",
+    )
+
+
+@app.get("/bmp/<int:player>/back")
+def bmp_player_back(player: int):
+    _require_player(player)
+    data = _get_bmp_for_player(player, "back")
+    return send_file(
+        io.BytesIO(data),
+        mimetype="image/bmp",
+        as_attachment=True,
+        download_name=f"player{player}_back.bmp",
+    )
+
+
+@app.get("/bmp/all")
+def bmp_all():
+    files = [
+        {"player": p, "face": face, "url": f"/bmp/{p}/{face}"}
+        for p in PLAYERS
+        for face in ("front", "back")
+    ]
+    return jsonify({"files": files})
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=False)
