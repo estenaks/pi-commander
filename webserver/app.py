@@ -7,6 +7,7 @@ import urllib.error
 import io
 import os
 import sys
+import qrcode
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -14,6 +15,8 @@ app = Flask(__name__)
 
 CARD_BACK_PATH = os.path.join(os.path.dirname(__file__), "cardback.jpg")
 CARD_BACK_WEB_URL = "/cardback.jpg"   # served to browser / used in faces_meta
+# Set CONFIG_PORT to ":8000" if not using nginx to forward port 80, otherwise leave blank
+CONFIG_PORT = ""
 
 PLAYERS = [1, 2, 3, 4]
 
@@ -94,25 +97,40 @@ def _any_to_bmp(url_or_path: str) -> bytes:
 
 
 def _make_config_prompt_bmp() -> bytes:
-    """Generate a 320×480 placeholder BMP telling the user to visit /config."""
+    """Generate a 320×480 placeholder BMP with a QR code and text
+    telling the user to visit /config."""
+    import qrcode
+
+    config_url = f"http://raspberrypi.local{CONFIG_PORT}/config"
+
+    qr = qrcode.QRCode(border=2)
+    qr.add_data(config_url)
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color="white", back_color="black").convert("RGB")
+
+    qr_size = 240
+    qr_img = qr_img.resize((qr_size, qr_size), Image.NEAREST)
+
     img = Image.new("RGB", (320, 480), (0, 0, 0))
     draw = ImageDraw.Draw(img)
+
+    qr_x = (320 - qr_size) // 2
+    qr_y = 60
+    img.paste(qr_img, (qr_x, qr_y))
+
+    font = ImageFont.load_default()
     lines = [
         "No card configured.",
-        "",
-        "Visit /config on the",
-        "pi-commander server",
-        "to set a card,",
+        "Scan or visit /config",
         "then reboot the Pico.",
     ]
-    font = ImageFont.load_default()
-    y = 160
+    y = qr_y + qr_size + 20
     for line in lines:
-        if line:
-            bbox = draw.textbbox((0, 0), line, font=font)
-            text_w = bbox[2] - bbox[0]
-            draw.text(((320 - text_w) // 2, y), line, fill=(255, 255, 255), font=font)
-        y += 24
+        bbox = draw.textbbox((0, 0), line, font=font)
+        text_w = bbox[2] - bbox[0]
+        draw.text(((320 - text_w) // 2, y), line, fill=(255, 255, 255), font=font)
+        y += 20
+
     buf = io.BytesIO()
     img.save(buf, format="BMP")
     return buf.getvalue()
@@ -405,9 +423,9 @@ def _get_bmp_for_player(player: int, face: str) -> bytes:
         bmp = _bmp_cache.get((player, face))
     if bmp is not None:
         return bmp
-    if _CARD_BACK_BMP is not None:
-        return _CARD_BACK_BMP
-    return _CONFIG_PROMPT_BMP  # never raises
+    return _CONFIG_PROMPT_BMP  # no card set for this player — always safe, never raises
+
+
 
 
 @app.get("/bmp/<int:player>/front")
