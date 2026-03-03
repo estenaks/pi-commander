@@ -112,18 +112,21 @@ def _make_config_prompt_bmp() -> bytes:
     qr_y = 60
     img.paste(qr_img, (qr_x, qr_y))
 
-    font = ImageFont.load_default()
+        font_large = ImageFont.load_default(size=20)
+    font_small = ImageFont.load_default(size=16)
     lines = [
-        "No card configured.",
-        "Scan or visit /config",
-        "then reboot the Pico.",
+        ("No card configured.", font_large),
+        ("", None),
+        ("Scan or visit /config", font_small),
+        ("then reboot the Pico.", font_small),
     ]
-    y = qr_y + qr_size + 20
-    for line in lines:
-        bbox = draw.textbbox((0, 0), line, font=font)
-        text_w = bbox[2] - bbox[0]
-        draw.text(((320 - text_w) // 2, y), line, fill=(255, 255, 255), font=font)
-        y += 20
+    y = qr_y + qr_size + 16
+    for line, font in lines:
+        if line and font:
+            bbox = draw.textbbox((0, 0), line, font=font)
+            text_w = bbox[2] - bbox[0]
+            draw.text(((320 - text_w) // 2, y), line, fill=(255, 255, 255), font=font)
+        y += 28
 
     img = img.rotate(90, expand=True)  # → 480×320 landscape, same as card BMPs
     buf = io.BytesIO()
