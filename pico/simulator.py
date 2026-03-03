@@ -37,23 +37,24 @@ except Exception:
 
 # ---- Config ----
 SERVER  = "http://127.0.0.1:8000"
-# Logical canvas matches BMP size (landscape)
 CW, CH  = 480, 320
-# Physical window is portrait (rotated 90° CW)
-WIN_W, WIN_H = CH, CW   # 320 × 480
+WIN_W, WIN_H = CH, CW   # 320 × 480 portrait window
 PLAYERS = [1, 2, 3, 4]
 SD_DIR  = os.path.join(os.path.dirname(__file__), "sd")
 
-# Touch zones in LOGICAL (landscape) coordinates
-ZONE_LEFT_MAX  = CW // 4       # x < 120  → dec
-ZONE_RIGHT_MIN = CW * 3 // 4  # x >= 360 → inc
+ZONE_LEFT_MAX  = CW // 4
+ZONE_RIGHT_MIN = CW * 3 // 4
 
-# Colours
-BLACK  = (0,   0,   0)
-WHITE  = (255, 255, 255)
-YELLOW = (255, 220,  50)
-RED    = (220,  50,  50)
-DIM    = (80,   80,  80)
+# ---- Colours ----
+BLACK      = (0,   0,   0)
+WHITE      = (255, 255, 255)
+DARK_BLUE  = (20,  40,  120)   # +1 counter
+DARK_RED   = (120, 15,  15)    # -1 counter
+ZONE_GRAY  = (128, 128, 128)   # button fill (semi-transparent below)
+DIM        = (160, 160, 160)   # button label text
+
+# Button background: gray at 75% opacity = alpha 191
+ZONE_ALPHA = 191
 
 
 # ---- Font ----
@@ -74,14 +75,6 @@ def render_text(font, text: str, color) -> "pygame.Surface":
 # ---- Coordinate mapping ----
 
 def window_to_logical(wx: int, wy: int) -> tuple[int, int]:
-    """
-    Map a click on the portrait window (320×480) back to logical
-    landscape coordinates (480×320).
-
-    Physical rotation is 90° CW:
-        logical_x = wy
-        logical_y = WIN_W - 1 - wx   (= 319 - wx)
-    """
     lx = wy
     ly = WIN_W - 1 - wx
     return lx, ly
@@ -131,24 +124,32 @@ def load_surface(player: int, face: str) -> "pygame.Surface | None":
         return None
 
 
-# ---- Drawing (all done on logical 480×320 canvas) ----
+# ---- Drawing ----
 
 def draw_zone_hints(canvas, font_small) -> None:
-    pygame.draw.rect(canvas, DIM, (0, 0, ZONE_LEFT_MAX, CH), 1)
-    t = render_text(font_small, "-1", DIM)
+    """Gray semi-transparent button zones with labels."""
+    # Left zone — dec (-1), dark red label
+    left_bg = pygame.Surface((ZONE_LEFT_MAX, CH), pygame.SRCALPHA)
+    left_bg.fill((*ZONE_GRAY, ZONE_ALPHA))
+    canvas.blit(left_bg, (0, 0))
+    t = render_text(font_small, "-1", DARK_RED)
     canvas.blit(t, (ZONE_LEFT_MAX // 2 - t.get_width() // 2, CH // 2 - 8))
 
-    pygame.draw.rect(canvas, DIM, (ZONE_RIGHT_MIN, 0, CW - ZONE_RIGHT_MIN, CH), 1)
-    t = render_text(font_small, "+1", DIM)
+    # Right zone — inc (+1), dark blue label
+    right_bg = pygame.Surface((CW - ZONE_RIGHT_MIN, CH), pygame.SRCALPHA)
+    right_bg.fill((*ZONE_GRAY, ZONE_ALPHA))
+    canvas.blit(right_bg, (ZONE_RIGHT_MIN, 0))
+    t = render_text(font_small, "+1", DARK_BLUE)
     canvas.blit(t, (ZONE_RIGHT_MIN + (CW - ZONE_RIGHT_MIN) // 2 - t.get_width() // 2, CH // 2 - 8))
 
-    t = render_text(font_small, "flip", DIM)
+    # Centre zone — flip, neutral label
+    t = render_text(font_small, "tap to flip", DIM)
     canvas.blit(t, (CW // 2 - t.get_width() // 2, CH // 2 - 8))
 
 
 def draw_overlay(canvas, counter: int, player: int, face: str,
                  font_large, font_small) -> None:
-    # Status bar along the logical top edge
+    # Status bar
     bar = pygame.Surface((CW, 22), pygame.SRCALPHA)
     bar.fill((0, 0, 0, 170))
     canvas.blit(bar, (0, 0))
@@ -159,15 +160,16 @@ def draw_overlay(canvas, counter: int, player: int, face: str,
     )
     canvas.blit(hud, (6, 3))
 
-    # Counter centred on canvas
+    # Counter
     if counter != 0:
+        color = DARK_BLUE if counter > 0 else DARK_RED
+        sign  = "+" if counter > 0 else ""
+        # Semi-transparent bg sized to counter text
         bg = pygame.Surface((240, 72), pygame.SRCALPHA)
         bg.fill((0, 0, 0, 150))
         canvas.blit(bg, (CW // 2 - 120, CH // 2 - 36))
-        sign  = "+" if counter > 0 else ""
-        color = YELLOW if counter > 0 else RED
-        text  = render_text(font_large, f"{sign}{counter}/{sign}{counter}", color)
-        rect  = text.get_rect(center=(CW // 2, CH // 2))
+        text = render_text(font_large, f"{sign}{counter}/{sign}{counter}", color)
+        rect = text.get_rect(center=(CW // 2, CH // 2))
         canvas.blit(text, rect)
 
 
@@ -175,15 +177,13 @@ def draw_overlay(canvas, counter: int, player: int, face: str,
 
 def main() -> None:
     pygame.init()
-    # Portrait window — matches physically rotated display
     screen = pygame.display.set_mode((WIN_W, WIN_H))
     pygame.display.set_caption("pi-commander simulator (rotated 90° CW)")
     clock      = pygame.time.Clock()
     font_large = make_font("monospace", 52, bold=True)
     font_small = make_font("monospace", 14)
 
-    # Offscreen landscape canvas — everything is drawn here, then rotated
-    canvas = pygame.Surface((CW, CH))
+    canvas = pygame.Surface((CW, CH), pygame.SRCALPHA)
 
     player  = 1
     face    = "front"
@@ -196,7 +196,6 @@ def main() -> None:
         screen.blit(pygame.transform.rotate(canvas, -90), (0, 0))
         pygame.display.flip()
 
-    # Boot
     if not os.path.exists(bmp_filename(1, "front")):
         show_status("Downloading BMPs from server…")
         try:
@@ -216,12 +215,11 @@ def main() -> None:
             err = render_text(
                 font_small,
                 f"No BMP: player {player} {face} — press R",
-                RED,
+                DARK_RED,
             )
             canvas.blit(err, (20, CH // 2))
         draw_zone_hints(canvas, font_small)
         draw_overlay(canvas, counter, player, face, font_large, font_small)
-        # Rotate canvas 90° CW onto the portrait window
         screen.blit(pygame.transform.rotate(canvas, -90), (0, 0))
         pygame.display.flip()
 
@@ -234,7 +232,6 @@ def main() -> None:
                 running = False
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                # Map portrait window click → logical landscape coords
                 lx, _ = window_to_logical(*event.pos)
                 if lx < ZONE_LEFT_MAX:
                     counter -= 1

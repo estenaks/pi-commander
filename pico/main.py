@@ -2,15 +2,26 @@
 pi-commander — MicroPython for Pico 2 W + Waveshare Pico-Eval-Board.
 
 Touch zones (landscape 480×320):
-    Left  25%  (x < 120)   → -1 counter
-    Right 25%  (x >= 360)  → +1 counter
-    Centre     (120–359)   → flip front/back, reset counter
-KEY button (GP22)          → cycle players
+
+    y < 30                        → brightness up   (full width)
+    y >= 290                      → brightness down (full width)
+    y 30–289, x < 120             → -1 counter
+    y 30–289, x >= 360            → +1 counter
+    y 30–289, x 120–359           → flip front/back, reset counter
+
+Backlight:
+    Full brightness on boot
+    No touch for 30s → dim to 20%
+    First touch while dimmed → wake only (no card action)
+    Next touch → normal action
+
+KEY button (physical):
+    Cycles players 1→2→3→4→1, always acts (never swallowed by dim state)
 
 Requires on Pico filesystem:
     ili9488.py    ILI9488 SPI display driver
     xpt2046.py    XPT2046 SPI touch driver
-    sdcard.py     SD card block driver (ships with MicroPython extras)
+    sdcard.py     SD card block driver
 
 !! Verify all GPIO pins against the Waveshare Pico-Eval-Board schematic !!
    https://www.waveshare.com/wiki/Pico-Eval-Board
@@ -21,7 +32,7 @@ import gc
 import time
 import network
 import urequests
-from machine import Pin, SPI
+from machine import Pin, SPI, PWM
 
 # ---- User config ----
 WIFI_SSID = "your-ssid"
@@ -39,8 +50,8 @@ LCD_RST  = 15
 LCD_BL   = 13
 
 # ---- Touch — XPT2046, same SPI bus, separate CS — verify pins! ----
-TOUCH_CS  = 16   # !! check schematic
-TOUCH_IRQ = 17   # !! check schematic (IRQ/PENIRQ pin)
+TOUCH_CS  = 16
+TOUCH_IRQ = 17
 
 # ---- SD card — SPI0 — verify pins! ----
 SD_SPI   = 0
@@ -49,12 +60,14 @@ SD_MOSI  = 19
 SD_MISO  = 20
 SD_CS    = 22
 
-# ---- KEY button (single physical button on board) — verify pin! ----
-BTN_KEY  = Pin(21, Pin.IN, Pin.PULL_UP)  # !! check schematic
+# ---- KEY button — verify pin! ----
+BTN_KEY = Pin(21, Pin.IN, Pin.PULL_UP)
 
-# ---- Touch zone x boundaries (landscape 480×320) ----
-ZONE_LEFT_MAX  = 120   # x < 120  → dec counter
-ZONE_RIGHT_MIN = 360   # x >= 360 → inc counter
+# ---- Touch zones (landscape 480×320) ----
+ZONE_LEFT_MAX  = 120   # x < 120  → dec
+ZONE_RIGHT_MIN = 360   # x >= 360 → inc
+ZONE_TOP_MAX   = 30    # y < 30   → brightness up   (full width, claims corners)
+ZONE_BOT_MIN   = 290   # y >= 290 → brightness down (full width, claims corners)
 
 # ---- Touch calibration — tune after first flash ----
 TOUCH_X_MIN = 200
@@ -62,15 +75,86 @@ TOUCH_X_MAX = 3800
 TOUCH_Y_MIN = 200
 TOUCH_Y_MAX = 3800
 
+# ---- Backlight ----
+BL_FREQ     = 1000
+BL_FULL     = 65535  # 100%
+BL_DIM      = 13107  # 20% — auto-dim level
+BL_STEP     = 6553   # 10% per tap
+BL_MIN      = 6553   # 10% — manual minimum so screen never goes fully dark
+DIM_TIMEOUT = 30_000 # ms
+
+# ---- App ----
 PLAYERS  = [1, 2, 3, 4]
 SD_MOUNT = "/sd"
 BMP_DIR  = SD_MOUNT + "/bmps"
 
 # ---- Colours RGB565 ----
-BLACK  = 0x0000
-WHITE  = 0xFFFF
-YELLOW = 0xFFE0
-RED    = 0xF800
+BLACK        = 0x0000
+WHITE        = 0xFFFF
+DARK_BLUE    = 0x0299   # +1 counter text
+DARK_RED     = 0x6001   # -1 counter text
+DARK_BLUE_BG = 0x0102   # +1 counter rect background
+DARK_RED_BG  = 0x3000   # -1 counter rect background
+
+
+# ---- Backlight ----
+
+class Backlight:
+    def __init__(self, pin: int):
+        self._pwm   = PWM(Pin(pin), freq=BL_FREQ)
+        self._level = BL_FULL
+        self._pwm.duty_u16(BL_FULL)
+
+    def set(self, duty: int):
+        self._level = max(BL_MIN, min(BL_FULL, duty))
+        self._pwm.duty_u16(self._level)
+
+    def full(self):
+        self._level = BL_FULL
+        self._pwm.duty_u16(BL_FULL)
+
+    def dim(self):
+        # Don't update _level — so step_up/down resume from pre-dim level
+        self._pwm.duty_u16(BL_DIM)
+
+    def step_up(self):
+        self.set(self._level + BL_STEP)
+
+    def step_down(self):
+        self.set(self._level - BL_STEP)
+
+
+# ---- Display state ----
+
+class DisplayState:
+    """Tracks awake/dimmed state and last-touch timestamp."""
+    AWAKE  = "awake"
+    DIMMED = "dimmed"
+
+    def __init__(self, backlight: Backlight):
+        self.bl          = backlight
+        self.state       = self.AWAKE
+        self._last_touch = time.ticks_ms()
+
+    def touch(self) -> bool:
+        """
+        Call on every touch/button event.
+        Returns True  → act on the touch normally.
+        Returns False → wake-only, swallow the touch.
+        """
+        self._last_touch = time.ticks_ms()
+        if self.state == self.DIMMED:
+            self.state = self.AWAKE
+            self.bl.full()
+            return False
+        return True
+
+    def tick(self):
+        """Call every main loop iteration — triggers auto-dim after timeout."""
+        if self.state == self.AWAKE:
+            if time.ticks_diff(time.ticks_ms(), self._last_touch) > DIM_TIMEOUT:
+                self.state = self.DIMMED
+                self.bl.dim()
 
 
 # ---- SD ----
@@ -79,7 +163,7 @@ def mount_sd():
     import sdcard
     spi = SPI(SD_SPI, baudrate=4_000_000,
               sck=Pin(SD_SCK), mosi=Pin(SD_MOSI), miso=Pin(SD_MISO))
-    sd  = sdcard.SDCard(spi, Pin(SD_CS, Pin.OUT))
+    sd = sdcard.SDCard(spi, Pin(SD_CS, Pin.OUT))
     os.mount(os.VfsFat(sd), SD_MOUNT)
     print("SD mounted")
     try:
@@ -138,23 +222,27 @@ def download_all(lcd=None):
 
 # ---- Display ----
 
-def set_landscape(lcd):
-    """
-    Write MADCTL (0x36) to rotate the ILI9488 coordinate system 90° CW
-    so x/y match landscape orientation (480 wide, 320 tall).
-    0x28 = MX | BGR — adjust if image appears mirrored or upside down:
-        0x28 → 90° CW  (try this first)
-        0xE8 → 90° CW, mirrored
-        0x48 → 90° CCW
-        0xA8 → 90° CCW, mirrored
-    """
-    lcd.write_cmd(0x36)
-    lcd.write_data(bytes([0x28]))
+def init_display():
+    import ili9488
+    spi = SPI(LCD_SPI, baudrate=40_000_000,
+              sck=Pin(LCD_SCK), mosi=Pin(LCD_MOSI), miso=Pin(LCD_MISO))
+    lcd = ili9488.ILI9488(
+        spi,
+        cs=Pin(LCD_CS,  Pin.OUT),
+        dc=Pin(LCD_DC,  Pin.OUT),
+        rst=Pin(LCD_RST, Pin.OUT),
+        bl=Pin(LCD_BL,  Pin.OUT),
+    )
+    lcd.init()
+    lcd.rotation(1)   # landscape — try rotation(3) if upside down
+    return lcd, spi   # return spi so touch can share the bus
 
 
 def show_bmp(lcd, player, face):
-    """Stream BMP pixels to display, skipping the 54-byte header."""
-    with open(bmp_path(player, face), "rb") as f:
+    """Stream BMP pixels directly to the display, skipping the 54-byte header."""
+    path = bmp_path(player, face)
+    print(f"Displaying {path}")
+    with open(path, "rb") as f:
         f.seek(54)
         lcd.set_window(0, 0, 479, 319)
         while True:
@@ -165,22 +253,28 @@ def show_bmp(lcd, player, face):
 
 
 def draw_counter(lcd, counter):
-    """Redraw counter overlay without redrawing the full BMP."""
-    lcd.fill_rect(120, 120, 240, 80, BLACK)
+    """Colored rect + text overlay centred on the card."""
+    rx, ry, rw, rh = 160, 130, 160, 60
+
     if counter == 0:
+        lcd.fill_rect(rx, ry, rw, rh, BLACK)
         return
+
     sign  = "+" if counter > 0 else ""
     label = f"{sign}{counter}/{sign}{counter}"
-    color = YELLOW if counter > 0 else RED
-    x     = 240 - len(label) * 4  # 8px chars, rough centre
-    lcd.text(label, x, 152, color)
+    color = DARK_BLUE    if counter > 0 else DARK_RED
+    bg    = DARK_BLUE_BG if counter > 0 else DARK_RED_BG
+
+    lcd.fill_rect(rx, ry, rw, rh, bg)
+    x = rx + (rw - len(label) * 8) // 2
+    y = ry + (rh - 8) // 2
+    lcd.text(label, x, y, color)
     lcd.show()
 
 
 # ---- Touch ----
 
 def init_touch(spi):
-    """XPT2046 shares the LCD SPI bus at a lower baud rate."""
     import xpt2046
     return xpt2046.XPT2046(
         spi,
@@ -192,13 +286,30 @@ def init_touch(spi):
 
 
 def get_touch_zone(touch):
-    """Returns 'dec', 'inc', 'flip', or None."""
+    """
+    Returns 'dec', 'inc', 'flip', 'bright_up', 'bright_down', or None.
+
+    Zone map (480×320 landscape):
+        y < 30                    → bright_up   (full width, claims corners)
+        y >= 290                  → bright_down (full width, claims corners)
+        y 30–289, x < 120         → dec
+        y 30–289, x >= 360        → inc
+        y 30–289, x 120–359       → flip
+    """
     if not touch.is_touched():
         return None
     coords = touch.get_touch()
     if coords is None:
         return None
-    tx, _ = coords
+    tx, ty = coords
+
+    # Top/bottom brightness strips — full width, corners included
+    if ty < ZONE_TOP_MAX:
+        return "bright_up"
+    if ty >= ZONE_BOT_MIN:
+        return "bright_down"
+
+    # Middle band — side and centre zones
     if tx < ZONE_LEFT_MAX:
         return "dec"
     if tx >= ZONE_RIGHT_MIN:
@@ -206,10 +317,13 @@ def get_touch_zone(touch):
     return "flip"
 
 
-# ---- Button debounce ----
+# ---- Debounce ----
 
-_btn_last = 0
-DEBOUNCE  = 300  # ms
+_btn_last      = 0
+_touch_last    = 0
+DEBOUNCE       = 300   # ms
+TOUCH_DEBOUNCE = 400   # ms
+
 
 def key_pressed():
     global _btn_last
@@ -219,11 +333,6 @@ def key_pressed():
         return True
     return False
 
-
-# ---- Touch debounce ----
-
-_touch_last    = 0
-TOUCH_DEBOUNCE = 400  # ms — resistive touch can be noisy
 
 def touch_event(touch):
     """Returns zone string or None, with debounce."""
@@ -243,19 +352,9 @@ def main():
     mount_sd()
     wifi_connect()
 
-    import ili9488
-    lcd_spi = SPI(LCD_SPI, baudrate=40_000_000,
-                  sck=Pin(LCD_SCK), mosi=Pin(LCD_MOSI), miso=Pin(LCD_MISO))
-    lcd = ili9488.ILI9488(
-        lcd_spi,
-        cs=Pin(LCD_CS,  Pin.OUT),
-        dc=Pin(LCD_DC,  Pin.OUT),
-        rst=Pin(LCD_RST, Pin.OUT),
-        bl=Pin(LCD_BL,  Pin.OUT),
-        width=480, height=320,
-    )
-    lcd.init()
-    set_landscape(lcd)  # rotate driver coords to match physical orientation
+    bl           = Backlight(LCD_BL)
+    lcd, lcd_spi = init_display()
+    ds           = DisplayState(bl)
 
     lcd.fill(BLACK)
     lcd.text("Downloading BMPs…", 10, 140, WHITE)
@@ -271,25 +370,35 @@ def main():
     show_bmp(lcd, player, face)
 
     while True:
-        # Physical KEY button → cycle player
+        ds.tick()  # check dim timeout every loop
+
+        # KEY button — always wakes and acts, never swallowed
         if key_pressed():
+            ds.touch()  # reset dim timer without swallowing
             player  = (player % len(PLAYERS)) + 1
             face    = "front"
             counter = 0
             show_bmp(lcd, player, face)
 
-        # Touch zones
-        zone = touch_event(touch)
-        if zone == "flip":
-            face    = "back" if face == "front" else "front"
-            counter = 0
-            show_bmp(lcd, player, face)
-        elif zone == "inc":
-            counter += 1
-            draw_counter(lcd, counter)
-        elif zone == "dec":
-            counter -= 1
-            draw_counter(lcd, counter)
+        # Touch
+        raw_zone = touch_event(touch)
+        if raw_zone:
+            act = ds.touch()  # False = wake-only, True = act on it
+            if act:
+                if raw_zone == "flip":
+                    face    = "back" if face == "front" else "front"
+                    counter = 0
+                    show_bmp(lcd, player, face)
+                elif raw_zone == "inc":
+                    counter += 1
+                    draw_counter(lcd, counter)
+                elif raw_zone == "dec":
+                    counter -= 1
+                    draw_counter(lcd, counter)
+                elif raw_zone == "bright_up":
+                    bl.step_up()
+                elif raw_zone == "bright_down":
+                    bl.step_down()
 
         time.sleep_ms(20)
 
