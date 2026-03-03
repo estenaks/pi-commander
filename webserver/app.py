@@ -125,6 +125,7 @@ def _make_config_prompt_bmp() -> bytes:
         draw.text(((320 - text_w) // 2, y), line, fill=(255, 255, 255), font=font)
         y += 20
 
+    img = img.rotate(90, expand=True)  # → 480×320 landscape, same as card BMPs
     buf = io.BytesIO()
     img.save(buf, format="BMP")
     return buf.getvalue()
