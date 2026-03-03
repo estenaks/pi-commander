@@ -1,10 +1,36 @@
 # pi-commander
 This repo includes a webserver built in python that uses the scryfall api to get specific cards, or random commanders (given color restrictions) and makes the border_crop image available on /face and the config availalbe on /config (both on port 8000)
 
-
 Additional guide for setting up nginx to serve on port 80 and setting the websever up as a service, auto open browser in fullscreen on boot etc (QOL only)
 
 I'm using this to access http://localhost/face?rotate=1 on a 3.5" display on my rpib3+ and using it as a proxy on the battlefield when playing commander, but you can use it for whatever you want.
+
+---
+
+## BMP endpoints (for Pico 2 W / embedded clients)
+
+After setting cards via `/config`, pre-converted BMP files (480×320, 24-bit RGB, landscape) are available for download. These are intended for embedded clients such as a Raspberry Pi Pico 2 W (my use case)that download images to an SD card on boot.
+
+Edit the app.py to change bmp resolution, orientation etc for your needs.
+
+**Get a manifest of all 8 BMP URLs:**
+```bash
+curl http://your-web-server/bmp/all
+```
+for example to recursively get all bmps
+
+**Download an individual BMP:**
+```bash
+# Front face for player 1
+curl -o player1_front.bmp http://your-web-server/bmp/1/front
+
+# Back face for player 1 (card back if single-faced)
+curl -o player1_back.bmp http://your-web-server/bmp/1/back
+```
+
+Players 1–4 are supported (`/bmp/1/` through `/bmp/4/`). If no card has been configured for a player, both front and back return a placeholder BMP with a QR code linking to `/config`.
+
+ **Note:** BMP files are generated server-side automatically whenever a card is set via `/config`. No image processing is required on the client.
 
 
 ---
