@@ -113,7 +113,6 @@
       if (rotate) document.documentElement.classList.add("rotate");
 
       function externalBaseUrl() {
-        // Keep current protocol + current port, but force hostname to raspberrypi.local
         const proto = location.protocol || "http:";
         const port = location.port ? `:${location.port}` : "";
         return `${proto}//${QR_HOST}${port}`;
@@ -180,7 +179,7 @@
       function cacheBust(url) {
         if (!url) return url;
         try {
-          const u = new URL(url);
+          const u = new URL(url, location.origin);
           u.searchParams.set("_t", Date.now().toString());
           return u.toString();
         } catch {
@@ -278,6 +277,7 @@
 
           const cardId = data.card_id || null;
           const nextFaces = Array.isArray(data.faces) ? data.faces : [];
+          // A face is valid if it has any image_url (including local /cardback.jpg)
           const hasCard = nextFaces.length > 0 && nextFaces[0] && nextFaces[0].image_url;
 
           if (!hasCard) {
