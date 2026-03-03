@@ -42,13 +42,6 @@ _bmp_cache: dict[tuple[int, str], bytes] = {}
 # ---- Image helpers ----
 
 def _image_to_bmp(data: bytes) -> bytes:
-    """Convert raw image bytes to a 320×480 RGB BMP.
-
-    Scales so height fills 480 px, then centre-crops to 320 px wide.
-    Pillow's BMP writer produces 24-bit RGB; true 16-bit RGB565 is not
-    natively supported — 24-bit is an acceptable fallback for most display
-    drivers.
-    """
     img = Image.open(io.BytesIO(data))
     orig_w, orig_h = img.size
     new_h = 480
@@ -62,6 +55,7 @@ def _image_to_bmp(data: bytes) -> bytes:
         padded.paste(img, ((320 - new_w) // 2, 0))
         img = padded
     img = img.convert("RGB")
+    img = img.rotate(90, expand=True)  # → 480×320 landscape for the Pico display
     buf = io.BytesIO()
     img.save(buf, format="BMP")
     return buf.getvalue()
