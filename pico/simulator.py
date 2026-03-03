@@ -19,17 +19,23 @@ Keyboard:
     Q / Escape  Quit
 """
 
-import io
 import os
 import sys
 import json
 import urllib.request
 
+# Import pygame core and freetype separately so a freetype failure
+# doesn't get swallowed by the ImportError catch on pygame itself.
 try:
     import pygame
-    import pygame.freetype
 except ImportError:
     sys.exit("pygame not found — run: pip install pygame")
+
+try:
+    import pygame.freetype
+    _freetype_ok = True
+except Exception:
+    _freetype_ok = False
 
 # ---- Config ----
 SERVER  = "http://127.0.0.1:8000"
@@ -38,8 +44,8 @@ PLAYERS = [1, 2, 3, 4]
 SD_DIR  = os.path.join(os.path.dirname(__file__), "sd")
 
 # Touch zone x boundaries
-ZONE_LEFT_MAX  = W // 4        # 0–119   → dec
-ZONE_RIGHT_MIN = W * 3 // 4   # 360–479 → inc
+ZONE_LEFT_MAX  = W // 4       # 0–119   → dec
+ZONE_RIGHT_MIN = W * 3 // 4  # 360–479 → inc
 
 # Colours
 BLACK  = (0,   0,   0)
@@ -48,6 +54,29 @@ YELLOW = (255, 220,  50)
 RED    = (220,  50,  50)
 DIM    = (80,   80,  80)
 
+
+# ---- Font helpers ----
+# freetype.render(text, color) returns (Surface, Rect).
+# We wrap it so call sites get back a plain Surface with a working .get_rect().
+
+def make_font(name: str, size: int, bold: bool = False):
+    if _freetype_ok:
+        return pygame.freetype.SysFont(name, size, bold=bold)
+    # Fallback to pygame.font if freetype somehow unavailable
+    pygame.font.init()
+    return pygame.font.SysFont(name, size, bold=bold)
+
+
+def render_text(font, text: str, color) -> "pygame.Surface":
+    """Render text to a Surface regardless of font type."""
+    if _freetype_ok and isinstance(font, pygame.freetype.Font):
+        surf, _ = font.render(text, color)
+        return surf
+    # pygame.font.Font path
+    return font.render(text, True, color)
+
+
+# ---- File helpers ----
 
 def _fetch_bytes(path: str) -> bytes:
     with urllib.request.urlopen(f"{SERVER}{path}", timeout=10) as r:
@@ -91,24 +120,20 @@ def load_surface(player: int, face: str) -> "pygame.Surface | None":
         return None
 
 
+# ---- Drawing ----
+
 def draw_zone_hints(screen, font_small) -> None:
     """Dim touch-zone borders so the user can see tap areas."""
-    # Left zone
     pygame.draw.rect(screen, DIM, (0, 0, ZONE_LEFT_MAX, H), 1)
-    t = font_small.render("−1", True, DIM)
+    t = render_text(font_small, "-1", DIM)
     screen.blit(t, (ZONE_LEFT_MAX // 2 - t.get_width() // 2, H // 2 - 8))
-    # Right zone
-    pygame.draw.rect(screen, DIM, (ZONE_RIGHT_MIN, 0, W - ZONE_RIGHT_MIN, H), 1)
-    t = font_small.render("+1", True, DIM)
-    screen.blit(t, (ZONE_RIGHT_MIN + (W - ZONE_RIGHT_MIN) // 2 - t.get_width() // 2, H // 2 - 8))
-    # Centre
-    t = font_small.render("flip", True, DIM)
-    screen.blit(t, (W // 2 - t.get_width() // 2, H // 2 - 8))
 
-def render(font, text, color):
-    """Wrapper so freetype.render() works like the old font.render()."""
-    surf, _ = font.render(text, color)
-    return surf
+    pygame.draw.rect(screen, DIM, (ZONE_RIGHT_MIN, 0, W - ZONE_RIGHT_MIN, H), 1)
+    t = render_text(font_small, "+1", DIM)
+    screen.blit(t, (ZONE_RIGHT_MIN + (W - ZONE_RIGHT_MIN) // 2 - t.get_width() // 2, H // 2 - 8))
+
+    t = render_text(font_small, "flip", DIM)
+    screen.blit(t, (W // 2 - t.get_width() // 2, H // 2 - 8))
 
 
 def draw_overlay(screen, counter: int, player: int, face: str,
@@ -117,9 +142,10 @@ def draw_overlay(screen, counter: int, player: int, face: str,
     bar = pygame.Surface((W, 22), pygame.SRCALPHA)
     bar.fill((0, 0, 0, 170))
     screen.blit(bar, (0, 0))
-    hud = font_small.render(
+    hud = render_text(
+        font_small,
         f"Player {player}  [{face}]   ENTER=next player   R=reload   Q=quit",
-        True, WHITE,
+        WHITE,
     )
     screen.blit(hud, (6, 3))
 
@@ -130,17 +156,20 @@ def draw_overlay(screen, counter: int, player: int, face: str,
         screen.blit(bg, (W // 2 - 120, H // 2 - 36))
         sign  = "+" if counter > 0 else ""
         color = YELLOW if counter > 0 else RED
-        text  = render(font_large,f"{sign}{counter}/{sign}{counter}", True, color)
-        screen.blit(text, text.get_rect(center=(W // 2, H // 2)))
+        text  = render_text(font_large, f"{sign}{counter}/{sign}{counter}", color)
+        rect  = text.get_rect(center=(W // 2, H // 2))
+        screen.blit(text, rect)
 
+
+# ---- Main ----
 
 def main() -> None:
     pygame.init()
     screen = pygame.display.set_mode((W, H))
     pygame.display.set_caption("pi-commander simulator")
     clock      = pygame.time.Clock()
-    font_large = pygame.freetype.SysFont("monospace", 52, bold=True)
-    font_small = pygame.freetype.SysFont("monospace", 14)
+    font_large = make_font("monospace", 52, bold=True)
+    font_small = make_font("monospace", 14)
 
     player  = 1
     face    = "front"
@@ -148,7 +177,7 @@ def main() -> None:
 
     def show_status(msg: str) -> None:
         screen.fill(BLACK)
-        t = font_small.render(msg, True, WHITE)
+        t = render_text(font_small, msg, WHITE)
         screen.blit(t, (20, H // 2 - 10))
         pygame.display.flip()
 
@@ -169,8 +198,10 @@ def main() -> None:
         if surf:
             screen.blit(surf, (0, 0))
         else:
-            err = font_small.render(
-                f"No BMP: player {player} {face} — press R", True, RED
+            err = render_text(
+                font_small,
+                f"No BMP: player {player} {face} — press R",
+                RED,
             )
             screen.blit(err, (20, H // 2))
         draw_zone_hints(screen, font_small)
@@ -192,7 +223,6 @@ def main() -> None:
                 elif mx >= ZONE_RIGHT_MIN:
                     counter += 1
                 else:
-                    # Centre tap → flip
                     face    = "back" if face == "front" else "front"
                     counter = 0
                 draw()

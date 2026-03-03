@@ -1,2 +1,2 @@
+# Requires Python 3.13 — pygame 2.6.x font module is broken on Python 3.14
 pygame==2.6.1
-requests==2.32.3
