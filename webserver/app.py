@@ -112,7 +112,7 @@ def _make_config_prompt_bmp() -> bytes:
     qr_y = 60
     img.paste(qr_img, (qr_x, qr_y))
 
-        font_large = ImageFont.load_default(size=20)
+    font_large = ImageFont.load_default(size=20)
     font_small = ImageFont.load_default(size=16)
     lines = [
         ("No card configured.", font_large),
