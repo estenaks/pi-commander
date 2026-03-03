@@ -52,7 +52,7 @@ SD_CS    = 22
 # ---- KEY button (single physical button on board) — verify pin! ----
 BTN_KEY  = Pin(21, Pin.IN, Pin.PULL_UP)  # !! check schematic
 
-# ---- Touch zone x boundaries (display width = 480) ----
+# ---- Touch zone x boundaries (landscape 480×320) ----
 ZONE_LEFT_MAX  = 120   # x < 120  → dec counter
 ZONE_RIGHT_MIN = 360   # x >= 360 → inc counter
 
@@ -138,20 +138,18 @@ def download_all(lcd=None):
 
 # ---- Display ----
 
-def init_display():
-    import ili9488
-    spi = SPI(LCD_SPI, baudrate=40_000_000,
-              sck=Pin(LCD_SCK), mosi=Pin(LCD_MOSI), miso=Pin(LCD_MISO))
-    lcd = ili9488.ILI9488(
-        spi,
-        cs=Pin(LCD_CS,  Pin.OUT),
-        dc=Pin(LCD_DC,  Pin.OUT),
-        rst=Pin(LCD_RST, Pin.OUT),
-        bl=Pin(LCD_BL,  Pin.OUT),
-        width=480, height=320,
-    )
-    lcd.init()
-    return lcd
+def set_landscape(lcd):
+    """
+    Write MADCTL (0x36) to rotate the ILI9488 coordinate system 90° CW
+    so x/y match landscape orientation (480 wide, 320 tall).
+    0x28 = MX | BGR — adjust if image appears mirrored or upside down:
+        0x28 → 90° CW  (try this first)
+        0xE8 → 90° CW, mirrored
+        0x48 → 90° CCW
+        0xA8 → 90° CCW, mirrored
+    """
+    lcd.write_cmd(0x36)
+    lcd.write_data(bytes([0x28]))
 
 
 def show_bmp(lcd, player, face):
@@ -181,11 +179,11 @@ def draw_counter(lcd, counter):
 
 # ---- Touch ----
 
-def init_touch(lcd_spi):
+def init_touch(spi):
     """XPT2046 shares the LCD SPI bus at a lower baud rate."""
     import xpt2046
     return xpt2046.XPT2046(
-        lcd_spi,
+        spi,
         cs=Pin(TOUCH_CS, Pin.OUT),
         int_pin=Pin(TOUCH_IRQ, Pin.IN),
         x_min=TOUCH_X_MIN, x_max=TOUCH_X_MAX,
@@ -193,11 +191,8 @@ def init_touch(lcd_spi):
     )
 
 
-def get_touch_zone(touch, display_w=480):
-    """
-    Returns 'dec', 'inc', 'flip', or None.
-    Reads raw touch, maps to display pixel x, classifies zone.
-    """
+def get_touch_zone(touch):
+    """Returns 'dec', 'inc', 'flip', or None."""
     if not touch.is_touched():
         return None
     coords = touch.get_touch()
@@ -226,7 +221,8 @@ def key_pressed():
 
 
 # ---- Touch debounce ----
-_touch_last = 0
+
+_touch_last    = 0
 TOUCH_DEBOUNCE = 400  # ms — resistive touch can be noisy
 
 def touch_event(touch):
@@ -250,9 +246,7 @@ def main():
     import ili9488
     lcd_spi = SPI(LCD_SPI, baudrate=40_000_000,
                   sck=Pin(LCD_SCK), mosi=Pin(LCD_MOSI), miso=Pin(LCD_MISO))
-
-    import ili9488 as _ili
-    lcd = _ili.ILI9488(
+    lcd = ili9488.ILI9488(
         lcd_spi,
         cs=Pin(LCD_CS,  Pin.OUT),
         dc=Pin(LCD_DC,  Pin.OUT),
@@ -261,6 +255,8 @@ def main():
         width=480, height=320,
     )
     lcd.init()
+    set_landscape(lcd)  # rotate driver coords to match physical orientation
+
     lcd.fill(BLACK)
     lcd.text("Downloading BMPs…", 10, 140, WHITE)
     lcd.show()
