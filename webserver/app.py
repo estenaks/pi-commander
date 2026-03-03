@@ -455,6 +455,37 @@ def bmp_all():
     ]
     return jsonify({"files": files})
 
+def _print_endpoints(host: str, port: int) -> None:
+    base = f"http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"
+    lines = [
+        "",
+        "  pi-commander running — endpoints:",
+        "",
+        f"  Browser",
+        f"    {base}/",
+        f"    {base}/face",
+        f"    {base}/player2",
+        f"    {base}/player3",
+        f"    {base}/player4",
+        f"    {base}/config",
+        f"    {base}/cardback.jpg",
+        "",
+        f"  API",
+        f"    GET  {base}/api/current/<player>",
+        f"    POST {base}/api/search/<player>",
+        f"    POST {base}/api/random/<player>",
+        "",
+        f"  BMP",
+        f"    GET  {base}/bmp/all",
+        f"    GET  {base}/bmp/1/front   {base}/bmp/1/back",
+        f"    GET  {base}/bmp/2/front   {base}/bmp/2/back",
+        f"    GET  {base}/bmp/3/front   {base}/bmp/3/back",
+        f"    GET  {base}/bmp/4/front   {base}/bmp/4/back",
+        "",
+    ]
+    print("\n".join(lines))
+
 
 if __name__ == "__main__":
+    _print_endpoints("0.0.0.0", 8000)
     app.run(host="0.0.0.0", port=8000, debug=False)
