@@ -6,12 +6,14 @@ import threading
 import urllib.error
 import io
 import sys
+import os
 
 from PIL import Image
 
 app = Flask(__name__)
 
-CARD_BACK_URL = "https://files.mtg.wiki/Magic_card_back.jpg"
+CARD_BACK_PATH = os.path.join(os.path.dirname(__file__), "cardback.jpg")
+CARD_BACK_URL = CARD_BACK_PATH #kept to minimize code changes, is local file now
 PLAYERS = [1, 2, 3, 4]
 
 _state_lock = threading.Lock()
