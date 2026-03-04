@@ -587,6 +587,29 @@ def _get_rare_or_mythic_card_from_set(set_cards: list[dict], exclude_ids: set = 
     print(f"[booster] No available rare cards!")
     return None
 
+def _get_common_land_from_set(set_cards: list[dict], exclude_ids: set = None) -> dict | None:
+    """Get a random common land from the set."""
+    if exclude_ids is None:
+        exclude_ids = set()
+    
+    # Get all common lands (includes both basic and non-basic)
+    common_lands = [card for card in set_cards 
+                   if card.get("rarity") == "common" and 
+                      "Land" in card.get("type_line", "")]
+    
+    # Filter out excluded cards
+    available_lands = [card for card in common_lands if card["id"] not in exclude_ids]
+    
+    if not available_lands:
+        print(f"[booster] No available common lands found")
+        return None
+    
+    # Just pick a random common land
+    selected = random.choice(available_lands)
+    exclude_ids.add(selected["id"])
+    print(f"[booster] Selected common land: {selected['name']}")
+    return selected
+
 # ---- Routes ----
 
 @app.get("/cardback.jpg")
@@ -762,6 +785,21 @@ def api_booster_single_card():
             return jsonify({
                 "card": card,
                 "from_cache": True,  # Now everything comes from cache
+                "fetch_time": round(fetch_time, 3)
+            })
+        
+        # Handle basic land logic
+        if rarity == "land":
+            card = _get_common_land_from_set(set_cards, exclude_ids)
+            if not card:
+                return jsonify({"error": f"No available land cards for set {set_code}"}), 404
+                
+            fetch_time = time.time() - start_time
+            print(f"[booster] Selected land card in {fetch_time:.3f}s: {card['name']}")
+            
+            return jsonify({
+                "card": card,
+                "from_cache": True,
                 "fetch_time": round(fetch_time, 3)
             })
         

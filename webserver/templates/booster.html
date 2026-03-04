@@ -121,6 +121,7 @@
         .rarity-uncommon { background: #c0c0c0; color: #000; }
         .rarity-rare { background: #ffb366; color: #000; }
         .rarity-mythic { background: #ff6b35; color: #fff; }
+        .rarity-land { background: #8b4513; color: #000; }
         .loading-text {
             position: absolute;
             top: 50%;
@@ -350,6 +351,28 @@
                 }
             }
 
+            // Generate land (1 card)
+            if (!generation.cancelled) {
+                updateProgress('Fetching basic land...');
+                try {
+                    const card = await fetchSingleCard(setCode, 'land', usedCardIds);
+                    if (!generation.cancelled && card) {
+                        displayCard(card, 13); // Slot 13 for the land
+                        usedCardIds.add(card.id);
+                        generation.cardCount++;
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch land:', error);
+                }
+            }
+
+            if (!generation.cancelled) {
+                updateProgress(`Pack complete! ${generation.cardCount}/14 cards loaded.`);
+                setTimeout(() => {
+                    document.getElementById('progress').style.display = 'none';
+                }, 2000);
+            }
+
             if (!generation.cancelled) {
                 updateProgress(`Pack complete! ${generation.cardCount}/13 cards loaded.`);
                 setTimeout(() => {
@@ -414,8 +437,9 @@
             img.title = `${card.name} - ${card.rarity}`;
             
             const rarityBadge = document.createElement('div');
-            rarityBadge.className = `card-rarity rarity-${card.rarity}`;
-            rarityBadge.textContent = card.rarity[0].toUpperCase();
+            const displayRarity = card.type_line && card.type_line.includes('Land') ? 'land' : card.rarity;
+            rarityBadge.className = `card-rarity rarity-${displayRarity}`;
+            rarityBadge.textContent = displayRarity === 'land' ? 'L' : card.rarity[0].toUpperCase();
             
             cardSlot.appendChild(img);
             cardSlot.appendChild(rarityBadge);
