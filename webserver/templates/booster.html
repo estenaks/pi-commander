@@ -134,7 +134,7 @@
             padding: 6px;
             z-index: 10;
         }
-        .card-slot.revealed .send-overlay {
+        .card-slot.revealed:hover .send-overlay {
             display: flex;
         }
         .send-overlay button {
@@ -612,25 +612,25 @@
                         img.src = nextSrc;
 
                         if (nextIndex === -1) {
-                            // face-down
                             img.alt = 'Card back';
                             img.title = 'Click to reveal';
                             rarityBadge.style.display = 'none';
                             cardSlot.classList.remove('foil');
+                            cardSlot.classList.remove('revealed');
                         } else if (nextIndex === 0) {
-                            // front face
                             img.alt = card.name;
                             img.title = isDFC
                                 ? `${card.name} - click to see back face`
                                 : `${card.name} - ${card.rarity}${isFoil ? ' ✨' : ''}`;
                             rarityBadge.style.display = '';
                             if (isFoil) cardSlot.classList.add('foil');
+                            cardSlot.classList.add('revealed');
                         } else {
-                            // back face (DFC only)
                             img.alt = `${card.name} (back face)`;
                             img.title = `${card.name} - click to flip back`;
                             rarityBadge.style.display = '';
                             if (isFoil) cardSlot.classList.add('foil');
+                            cardSlot.classList.add('revealed');
                         }
 
                         faceIndex = nextIndex;
