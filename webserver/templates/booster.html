@@ -259,15 +259,21 @@
             const grid = document.getElementById('packGrid');
             grid.innerHTML = '';
 
-            // Create 12 empty card slots
-            for (let i = 0; i < 12; i++) {
+            // Create 13 empty card slots (9 common + 3 uncommon + 1 rare/mythic)
+            for (let i = 0; i < 13; i++) {
                 const cardSlot = document.createElement('div');
                 cardSlot.className = 'card-slot loading';
                 cardSlot.id = `card-slot-${i}`;
                 
                 const loadingText = document.createElement('div');
                 loadingText.className = 'loading-text';
-                loadingText.textContent = i < 9 ? 'Common' : 'Uncommon';
+                if (i < 9) {
+                    loadingText.textContent = 'Common';
+                } else if (i < 12) {
+                    loadingText.textContent = 'Uncommon';
+                } else {
+                    loadingText.textContent = 'Rare';
+                }
                 cardSlot.appendChild(loadingText);
                 
                 grid.appendChild(cardSlot);
@@ -313,8 +319,23 @@
                 }
             }
 
+            // Generate rare/mythic (1 card)
             if (!generation.cancelled) {
-                updateProgress(`Pack complete! ${generation.cardCount}/12 cards loaded.`);
+                updateProgress('Fetching rare/mythic card...');
+                try {
+                    const card = await fetchSingleCard(setCode, 'rare', usedCardIds);
+                    if (!generation.cancelled && card) {
+                        displayCard(card, 12); // Slot 12 for the rare/mythic
+                        usedCardIds.add(card.id);
+                        generation.cardCount++;
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch rare/mythic:', error);
+                }
+            }
+
+            if (!generation.cancelled) {
+                updateProgress(`Pack complete! ${generation.cardCount}/13 cards loaded.`);
                 setTimeout(() => {
                     document.getElementById('progress').style.display = 'none';
                 }, 2000);

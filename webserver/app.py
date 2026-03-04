@@ -478,8 +478,7 @@ def _get_cached_cards_for_set(set_code: str, rarity: str, count: int, exclude_id
                         "type_line": cached_card_data.get("type_line", "")
                     })
                     exclude_ids.add(card_id)  # Mark this card as used
-                    print(f"[booster] Using cached {rarity} card: {cached_card_data.get('name')}")
-                            
+                    print(f"[booster] ✅ CACHE HIT: Found cached {rarity} card: {cached_card_data.get('name')}")                            
         except Exception as e:
             print(f"[booster] Error reading cached card {cache_file}: {e}", file=sys.stderr)
             continue
@@ -572,6 +571,36 @@ def _get_cards_for_pack(set_code: str, rarity: str, count: int, exclude_ids: set
     
     return all_cards
 
+def _get_rare_or_mythic_card(set_code: str, exclude_ids: set = None) -> dict | None:
+    """Get a rare card with 1/8 chance of being mythic instead. Falls back to rare if no mythic found."""
+    if exclude_ids is None:
+        exclude_ids = set()
+    
+    # 1/8 chance for mythic (12.5%)
+    try_mythic = random.randint(1, 8) == 1
+    
+    if try_mythic:
+        print(f"[booster] Attempting mythic rare for {set_code}")
+        try:
+            # Try to get a mythic first
+            mythic_cards = _get_random_cards_with_filter(set_code, "mythic", 1, exclude_ids.copy())
+            if mythic_cards:
+                print(f"[booster] Found mythic rare: {mythic_cards[0]['name']}")
+                return mythic_cards[0]
+            else:
+                print(f"[booster] No mythic rares found for {set_code}, falling back to rare")
+        except Exception as e:
+            print(f"[booster] Error fetching mythic for {set_code}: {e}, falling back to rare")
+    
+    # Fall back to rare (either by choice or because mythic failed)
+    print(f"[booster] Getting rare card for {set_code}")
+    rare_cards = _get_random_cards_with_filter(set_code, "rare", 1, exclude_ids.copy())
+    if rare_cards:
+        print(f"[booster] Found rare: {rare_cards[0]['name']}")
+        return rare_cards[0]
+    
+    print(f"[booster] No rare cards found for {set_code}")
+    return None
 
 # ---- Routes ----
 
@@ -714,13 +743,29 @@ def api_booster_single_card():
         print(f"[booster] Fetching single {rarity} card for {set_code} (excluding {len(exclude_ids)} cards)")
         start_time = time.time()
         
+        # Handle rare/mythic logic
+        if rarity == "rare":
+            card = _get_rare_or_mythic_card(set_code, exclude_ids)
+            if not card:
+                return jsonify({"error": f"No rare or mythic cards found for set {set_code}"}), 404
+                
+            fetch_time = time.time() - start_time
+            print(f"[booster] Fetched {card['rarity']} card in {fetch_time:.3f}s: {card['name']}")
+            
+            return jsonify({
+                "card": card,
+                "from_cache": False,  # This goes through the random generation path
+                "fetch_time": round(fetch_time, 3)
+            })
+        
+        # Handle common/uncommon with cache logic
         # Try to get from cache first (avoiding duplicates)
         cached_cards = _get_cached_cards_for_set(set_code, rarity, 1, exclude_ids.copy())
         
         if cached_cards:
             card = cached_cards[0]
             fetch_time = time.time() - start_time
-            print(f"[booster] Served cached {rarity} card in {fetch_time:.3f}s: {card['name']}")
+            print(f"[booster] ✅ CACHE HIT: Served cached {rarity} card in {fetch_time:.3f}s: {card['name']}")
             
             return jsonify({
                 "card": card,
