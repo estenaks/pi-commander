@@ -133,7 +133,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>🎴 Booster Pack Simulator</h1>
+        <h1>Booster Pack Simulator</h1>
         
         <div class="controls">
             <div>
@@ -236,8 +236,9 @@
             
             // Update UI to show selected set
             document.getElementById('setSelect').value = randomSet.code;
-            document.getElementById('setInfo').textContent = 
-                `${randomSet.card_count} cards • Released: ${randomSet.released_at}`;
+            
+            // Use the same updateSetInfo function that handles icons
+            updateSetInfo(randomSet);
             
             await generatePackForSet(randomSet.code);
         }
@@ -385,7 +386,7 @@
                 const card = data.card;
                 
                 // If it's a common slot and we got a land, re-roll
-                if (rarity === "common" && is_common_land) {
+                if (rarity === "common" && card.is_common_land) {
                     console.log(`Re-rolling common land: ${card.name} (attempt ${attempts})`);
                     usedCardIds.add(card.id); // Exclude this basic from future attempts
                     continue; // Try again

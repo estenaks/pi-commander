@@ -28,6 +28,12 @@ CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 MAX_CACHE_SIZE_GB = 20
 CACHE_EXPIRY_DAYS = 365
 SCRYFALL_REQUEST_DELAY = 0.050  # 50ms delay between requests
+# Set exclusion list - sets to exclude from booster generation
+EXCLUDED_SET_CODES = {
+    # Manually excluded sets (add more as needed)
+    "pred"
+    # Commander sets are excluded by name filter below
+}
 
 _state_lock = threading.Lock()
 _state_by_player = {
@@ -639,13 +645,29 @@ def api_booster_sets():
         eligible_sets = []
         for set_data in sets_data:
             set_type = set_data.get("set_type", "")
+            set_code = set_data.get("code", "").lower()
+            set_name = set_data.get("name", "").lower()
+            
+            # Skip excluded sets
+            if set_code in EXCLUDED_SET_CODES:
+                continue
+                
+            # Skip commander precon sets (but allow commander booster sets like "Commander Legends")
+            # and skip jumpstart sets
+            if (set_name.endswith("commander") or 
+                (set_name.startswith("commander") and any(char.isdigit() for char in set_name)) or
+                " commander" in set_name or
+                "jumpstart" in set_name):
+                continue
+            
             if set_type in ["expansion", "core", "masters", "draft_innovation", "commander"]:
                 eligible_sets.append({
                     "code": set_data.get("code"),
                     "name": set_data.get("name"),
                     "released_at": set_data.get("released_at"),
                     "card_count": set_data.get("card_count", 0),
-                    "set_type": set_type
+                    "set_type": set_type,
+                    "icon_svg_uri": set_data.get("icon_svg_uri", "")  # Add icon
                 })
         
         return jsonify({
