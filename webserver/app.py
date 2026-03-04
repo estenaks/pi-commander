@@ -523,6 +523,26 @@ def _get_cards_by_rarity_from_set(set_cards: list[dict], rarity: str) -> list[di
     """Filter cards by rarity from a complete set."""
     return [card for card in set_cards if card.get("rarity") == rarity]
 
+def _select_random_cards_from_pool(card_pool: list[dict], count: int, exclude_ids: set = None) -> list[dict]:
+    """Select random cards from a pool, avoiding duplicates."""
+    if exclude_ids is None:
+        exclude_ids = set()
+    
+    # Filter out already used cards
+    available_cards = [card for card in card_pool if card["id"] not in exclude_ids]
+    
+    if len(available_cards) < count:
+        print(f"[booster] Warning: Only {len(available_cards)} cards available, requested {count}")
+        return available_cards
+    
+    # Randomly select without replacement
+    selected = random.sample(available_cards, count)
+    
+    # Mark as used
+    for card in selected:
+        exclude_ids.add(card["id"])
+    
+    return selected
 
 def _has_mythic_rares(set_cards: list[dict]) -> bool:
     """Check if a set has any mythic rare cards."""
@@ -661,7 +681,7 @@ def api_booster_sets():
                 "jumpstart" in set_name):
                 continue
             
-            if set_type in ["expansion", "core", "masters", "draft_innovation", "commander"]:
+            if set_type in ["expansion", "core", "masters", "draft_innovation", "commander", "funny", "starter", "eternal"]:
                 eligible_sets.append({
                     "code": set_data.get("code"),
                     "name": set_data.get("name"),
