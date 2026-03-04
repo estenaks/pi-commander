@@ -8,6 +8,8 @@ import io
 import os
 import sys
 import qrcode
+import time
+from datetime import datetime, timedelta
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -19,6 +21,12 @@ CARD_BACK_WEB_URL = "/cardback.jpg"   # served to browser / used in faces_meta
 CONFIG_PORT = ""
 
 PLAYERS = [1, 2, 3, 4]
+
+# Cache configuration
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
+MAX_CACHE_SIZE_GB = 5
+CACHE_EXPIRY_DAYS = 365
+SCRYFALL_REQUEST_DELAY = 0.075  # 75ms delay between requests
 
 _state_lock = threading.Lock()
 _state_by_player = {
@@ -37,6 +45,108 @@ _state_by_player = {
 # BMP cache: keyed by (player, face) where face is "front" or "back"
 # Protected by _state_lock
 _bmp_cache: dict[tuple[int, str], bytes] = {}
+
+# Scryfall cache: keyed by cache filename
+_cache_lock = threading.Lock()
+
+def _ensure_cache_dir():
+    """Ensure the cache directory exists."""
+    os.makedirs(CACHE_DIR, exist_ok=True)
+
+def _get_cache_path(cache_key: str) -> str:
+    """Get the full path for a cache file."""
+    return os.path.join(CACHE_DIR, f"{cache_key}.json")
+
+def _get_cache_size_gb() -> float:
+    """Get current cache size in GB."""
+    if not os.path.exists(CACHE_DIR):
+        return 0.0
+    
+    total_size = 0
+    for filename in os.listdir(CACHE_DIR):
+        file_path = os.path.join(CACHE_DIR, filename)
+        if os.path.isfile(file_path):
+            total_size += os.path.getsize(file_path)
+    
+    return total_size / (1024 ** 3)  # Convert to GB
+
+def _cleanup_old_cache():
+    """Remove cache files older than CACHE_EXPIRY_DAYS or if cache is too large."""
+    if not os.path.exists(CACHE_DIR):
+        return
+    
+    now = datetime.now()
+    files_info = []
+    
+    # Get info about all cache files
+    for filename in os.listdir(CACHE_DIR):
+        if not filename.endswith('.json'):
+            continue
+            
+        file_path = os.path.join(CACHE_DIR, filename)
+        if os.path.isfile(file_path):
+            mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
+            size = os.path.getsize(file_path)
+            files_info.append((file_path, mtime, size))
+    
+    # Remove files older than expiry
+    for file_path, mtime, _ in files_info:
+        if now - mtime > timedelta(days=CACHE_EXPIRY_DAYS):
+            try:
+                os.remove(file_path)
+                print(f"[cache] Removed expired cache file: {os.path.basename(file_path)}")
+            except Exception as e:
+                print(f"[cache] Failed to remove expired file {file_path}: {e}")
+    
+    # If still too large, remove oldest files
+    current_size = _get_cache_size_gb()
+    if current_size > MAX_CACHE_SIZE_GB:
+        # Sort by modification time (oldest first)
+        files_info.sort(key=lambda x: x[1])
+        
+        for file_path, _, size in files_info:
+            if current_size <= MAX_CACHE_SIZE_GB:
+                break
+                
+            try:
+                os.remove(file_path)
+                current_size -= size / (1024 ** 3)
+                print(f"[cache] Removed old cache file to free space: {os.path.basename(file_path)}")
+            except Exception as e:
+                print(f"[cache] Failed to remove file {file_path}: {e}")
+
+def _get_cached_data(cache_key: str, cache_hours: int = 24) -> dict | None:
+    """Get data from cache if it exists and is not expired."""
+    cache_path = _get_cache_path(cache_key)
+    
+    if not os.path.exists(cache_path):
+        return None
+    
+    try:
+        # Check if file is too old based on cache_hours parameter
+        mtime = datetime.fromtimestamp(os.path.getmtime(cache_path))
+        if datetime.now() - mtime > timedelta(hours=cache_hours):
+            os.remove(cache_path)
+            print(f"[cache] Removed expired cache file: {cache_key} (older than {cache_hours} hours)")
+            return None
+        
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[cache] Error reading cache file {cache_key}: {e}")
+        return None
+
+def _set_cached_data(cache_key: str, data: dict) -> None:
+    """Save data to cache."""
+    _ensure_cache_dir()
+    cache_path = _get_cache_path(cache_key)
+    
+    try:
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f)
+        print(f"[cache] Cached data for key: {cache_key}")
+    except Exception as e:
+        print(f"[cache] Error writing cache file {cache_key}: {e}")
 
 
 # ---- Image helpers ----
@@ -152,7 +262,20 @@ def _require_player(player: int) -> int:
     return player
 
 
-def _scryfall_get(url: str) -> dict:
+def _scryfall_get(url: str, use_cache: bool = False, cache_key: str = None, cache_hours: int = 24) -> dict:
+    """Make a GET request to Scryfall with optional caching."""
+    
+    # Check cache first if enabled
+    if use_cache and cache_key:
+        with _cache_lock:
+            cached_data = _get_cached_data(cache_key, cache_hours)
+            if cached_data is not None:
+                print(f"[cache] Using cached data for: {cache_key}")
+                return cached_data
+    
+    # Add rate limiting delay
+    time.sleep(SCRYFALL_REQUEST_DELAY)
+    
     req = urllib.request.Request(
         url,
         headers={
@@ -161,10 +284,19 @@ def _scryfall_get(url: str) -> dict:
         },
         method="GET",
     )
+    
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = resp.read().decode("utf-8")
-            return json.loads(data)
+            result = json.loads(data)
+            
+        # Cache the result if caching is enabled
+        if use_cache and cache_key:
+            with _cache_lock:
+                _set_cached_data(cache_key, result)
+                
+        return result
+        
     except urllib.error.HTTPError as e:
         body = ""
         try:
@@ -289,6 +421,58 @@ def _set_player_state(player: int, *, last_query: str, card: dict) -> dict:
     return result
 
 
+# ---- Booster pack helpers ----
+
+def _get_all_sets() -> list[dict]:
+    """Get all Magic sets from Scryfall with 1-day caching."""
+    return _scryfall_get(
+        "https://api.scryfall.com/sets",
+        use_cache=True,
+        cache_key="all_sets",
+        cache_hours=24  # Cache sets list for only 1 day
+    ).get("data", [])
+
+
+def _get_random_cards_with_filter(set_code: str, rarity: str, count: int) -> list[dict]:
+    """Get random cards from a set with specific rarity."""
+    cards = []
+    max_attempts = count * 3  # Prevent infinite loops
+    attempts = 0
+    
+    while len(cards) < count and attempts < max_attempts:
+        attempts += 1
+        
+        try:
+            # Build query for random card with set and rarity filter
+            query = f"set:{set_code} rarity:{rarity}"
+            url = f"https://api.scryfall.com/cards/random?q={urllib.parse.quote(query)}"
+            
+            card_data = _scryfall_get(url)
+            
+            # Check if we already have this card
+            card_id = card_data.get("id")
+            if not any(c.get("id") == card_id for c in cards):
+                # Extract the image URL and basic info
+                image_url = _pick_image_border_crop_only(card_data.get("image_uris", {}))
+                
+                if image_url:
+                    cards.append({
+                        "id": card_id,
+                        "name": card_data.get("name", "Unknown"),
+                        "image_url": image_url,
+                        "rarity": rarity,
+                        "set": set_code,
+                        "mana_cost": card_data.get("mana_cost", ""),
+                        "type_line": card_data.get("type_line", "")
+                    })
+                    
+        except Exception as e:
+            print(f"[booster] Error fetching random {rarity} card: {e}", file=sys.stderr)
+            # Continue trying, but don't fail the whole pack
+            
+    return cards
+
+
 # ---- Routes ----
 
 @app.get("/cardback.jpg")
@@ -324,6 +508,87 @@ def player4():
 @app.get("/config")
 def config():
     return render_template("config.html")
+
+
+@app.get("/booster")
+def booster():
+    return render_template("booster.html")
+
+
+# ---- Booster API endpoints ----
+
+@app.get("/api/booster/sets")
+def api_booster_sets():
+    """Get all available Magic sets for booster generation."""
+    try:
+        with _cache_lock:
+            _cleanup_old_cache()  # Clean up old cache files periodically
+            
+        sets_data = _get_all_sets()
+        
+        # Filter to sets that are likely to have cards available for random generation
+        # Focus on regular expansion sets and avoid things like promos, tokens, etc.
+        eligible_sets = []
+        for set_data in sets_data:
+            set_type = set_data.get("set_type", "")
+            if set_type in ["expansion", "core", "masters", "draft_innovation", "commander"]:
+                eligible_sets.append({
+                    "code": set_data.get("code"),
+                    "name": set_data.get("name"),
+                    "released_at": set_data.get("released_at"),
+                    "card_count": set_data.get("card_count", 0),
+                    "set_type": set_type
+                })
+        
+        return jsonify({
+            "sets": eligible_sets,
+            "cache_size_gb": round(_get_cache_size_gb(), 2)
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/api/booster/generate")
+def api_booster_generate():
+    """Generate a booster pack for a specific set."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        set_code = payload.get("set_code", "").strip().lower()
+        
+        if not set_code:
+            return jsonify({"error": "Missing set_code parameter"}), 400
+        
+        print(f"[booster] Generating pack for set: {set_code}")
+        
+        # Generate the booster pack: 9 commons, 3 uncommons
+        commons = _get_random_cards_with_filter(set_code, "common", 9)
+        uncommons = _get_random_cards_with_filter(set_code, "uncommon", 3)
+        
+        # Combine and ensure we have 12 cards
+        all_cards = commons + uncommons
+        
+        if len(all_cards) < 12:
+            print(f"[booster] Warning: Only got {len(all_cards)}/12 cards for {set_code}")
+            # If we don't have enough cards, it might be a set with limited card availability
+            if len(all_cards) == 0:
+                return jsonify({"error": f"No cards found for set {set_code}. Try a different set."}), 404
+        
+        print(f"[booster] Generated {len(commons)} commons and {len(uncommons)} uncommons")
+        
+        return jsonify({
+            "set_code": set_code,
+            "cards": all_cards,
+            "pack_size": len(all_cards),
+            "breakdown": {
+                "commons": len(commons),
+                "uncommons": len(uncommons)
+            }
+        })
+        
+    except Exception as e:
+        print(f"[booster] Error generating pack: {e}", file=sys.stderr)
+        return jsonify({"error": str(e)}), 500
 
 
 # ---- API (per-player) ----
@@ -472,12 +737,15 @@ def _print_endpoints(host: str, port: int) -> None:
         f"    {base}/player3",
         f"    {base}/player4",
         f"    {base}/config",
+        f"    {base}/booster",
         f"    {base}/cardback.jpg",
         "",
         f"  API",
         f"    GET  {base}/api/current/<player>",
         f"    POST {base}/api/search/<player>",
         f"    POST {base}/api/random/<player>",
+        f"    GET  {base}/api/booster/sets",
+        f"    POST {base}/api/booster/generate",
         "",
         f"  BMP",
         f"    GET  {base}/bmp/all",
@@ -491,5 +759,9 @@ def _print_endpoints(host: str, port: int) -> None:
 
 
 if __name__ == "__main__":
+    # Clean up cache on startup
+    with _cache_lock:
+        _cleanup_old_cache()
+    
     _print_endpoints("0.0.0.0", 8000)
     app.run(host="0.0.0.0", port=8000, debug=False)
