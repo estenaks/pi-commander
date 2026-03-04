@@ -434,10 +434,13 @@ def _get_all_sets() -> list[dict]:
     ).get("data", [])
 
 
-def _get_cached_cards_for_set(set_code: str, rarity: str, count: int) -> list[dict]:
+def _get_cached_cards_for_set(set_code: str, rarity: str, count: int, exclude_ids: set = None) -> list[dict]:
     """Try to get cards from cache first, for faster pack generation."""
     if not os.path.exists(CACHE_DIR):
         return []
+    
+    if exclude_ids is None:
+        exclude_ids = set()
     
     cached_cards = []
     cache_files = [f for f in os.listdir(CACHE_DIR) if f.startswith("card_") and f.endswith(".json")]
@@ -457,24 +460,25 @@ def _get_cached_cards_for_set(set_code: str, rarity: str, count: int) -> list[di
                 # Check if this card matches our criteria
                 card_set = cached_card_data.get("set", "").lower()
                 card_rarity = cached_card_data.get("rarity", "").lower()
+                card_id = cached_card_data.get("id")
                 
-                if card_set == set_code.lower() and card_rarity == rarity.lower():
-                    # Make sure we don't have this card already
-                    card_id = cached_card_data.get("id")
-                    if not any(c.get("id") == card_id for c in cached_cards):
-                        
-                        image_url = _pick_image_border_crop_only(cached_card_data.get("image_uris", {}))
-                        if image_url:
-                            cached_cards.append({
-                                "id": card_id,
-                                "name": cached_card_data.get("name", "Unknown"),
-                                "image_url": image_url,
-                                "rarity": rarity,
-                                "set": set_code,
-                                "mana_cost": cached_card_data.get("mana_cost", ""),
-                                "type_line": cached_card_data.get("type_line", "")
-                            })
-                            print(f"[booster] Using cached {rarity} card: {cached_card_data.get('name')}")
+                # Skip if wrong set, rarity, or if we already used this card
+                if card_set != set_code.lower() or card_rarity != rarity.lower() or card_id in exclude_ids:
+                    continue
+                    
+                image_url = _pick_image_border_crop_only(cached_card_data.get("image_uris", {}))
+                if image_url:
+                    cached_cards.append({
+                        "id": card_id,
+                        "name": cached_card_data.get("name", "Unknown"),
+                        "image_url": image_url,
+                        "rarity": rarity,
+                        "set": set_code,
+                        "mana_cost": cached_card_data.get("mana_cost", ""),
+                        "type_line": cached_card_data.get("type_line", "")
+                    })
+                    exclude_ids.add(card_id)  # Mark this card as used
+                    print(f"[booster] Using cached {rarity} card: {cached_card_data.get('name')}")
                             
         except Exception as e:
             print(f"[booster] Error reading cached card {cache_file}: {e}", file=sys.stderr)
@@ -483,10 +487,13 @@ def _get_cached_cards_for_set(set_code: str, rarity: str, count: int) -> list[di
     return cached_cards
 
 
-def _get_random_cards_with_filter(set_code: str, rarity: str, count: int) -> list[dict]:
-    """Get random cards from a set with specific rarity, using caching for individual cards."""
+def _get_random_cards_with_filter(set_code: str, rarity: str, count: int, exclude_ids: set = None) -> list[dict]:
+    """Get random cards from a set with specific rarity, ensuring no duplicates."""
+    if exclude_ids is None:
+        exclude_ids = set()
+    
     cards = []
-    max_attempts = count * 5  # Increased attempts since we might hit cached duplicates
+    max_attempts = count * 10  # More attempts since we're avoiding duplicates
     attempts = 0
     
     while len(cards) < count and attempts < max_attempts:
@@ -497,48 +504,56 @@ def _get_random_cards_with_filter(set_code: str, rarity: str, count: int) -> lis
             query = f"set:{set_code} rarity:{rarity}"
             url = f"https://api.scryfall.com/cards/random?q={urllib.parse.quote(query)}"
             
-            # Don't cache the random endpoint itself, but cache individual cards
+            # Fetch a random card (don't cache the random call itself)
             card_data = _scryfall_get(url, use_cache=False)
             
-            # Check if we already have this card in this pack
+            # Check if we already have this card in our pack or exclude list
             card_id = card_data.get("id")
-            if not any(c.get("id") == card_id for c in cards):
-                
-                # Cache this individual card data for future use
-                card_cache_key = f"card_{card_id}"
-                with _cache_lock:
-                    _set_cached_data(card_cache_key, card_data)
-                
-                # Extract the image URL and basic info
-                image_url = _pick_image_border_crop_only(card_data.get("image_uris", {}))
-                
-                if image_url:
-                    cards.append({
-                        "id": card_id,
-                        "name": card_data.get("name", "Unknown"),
-                        "image_url": image_url,
-                        "rarity": rarity,
-                        "set": set_code,
-                        "mana_cost": card_data.get("mana_cost", ""),
-                        "type_line": card_data.get("type_line", "")
-                    })
-                    print(f"[booster] Fetched and cached {rarity} card: {card_data.get('name')}")
+            if card_id in exclude_ids:
+                print(f"[booster] Skipping duplicate card: {card_data.get('name')} ({card_id})")
+                continue
+            
+            # Cache this individual card data for future use
+            card_cache_key = f"card_{card_id}"
+            with _cache_lock:
+                _set_cached_data(card_cache_key, card_data)
+            
+            # Extract the image URL and basic info
+            image_url = _pick_image_border_crop_only(card_data.get("image_uris", {}))
+            
+            if image_url:
+                cards.append({
+                    "id": card_id,
+                    "name": card_data.get("name", "Unknown"),
+                    "image_url": image_url,
+                    "rarity": rarity,
+                    "set": set_code,
+                    "mana_cost": card_data.get("mana_cost", ""),
+                    "type_line": card_data.get("type_line", "")
+                })
+                exclude_ids.add(card_id)  # Mark this card as used
+                print(f"[booster] Fetched and cached {rarity} card: {card_data.get('name')}")
                     
         except Exception as e:
             print(f"[booster] Error fetching random {rarity} card: {e}", file=sys.stderr)
             # Continue trying, but don't fail the whole pack
             
+    if len(cards) < count:
+        print(f"[booster] Warning: Only found {len(cards)}/{count} unique {rarity} cards after {attempts} attempts")
+            
     return cards
 
 
-def _get_cards_for_pack(set_code: str, rarity: str, count: int) -> list[dict]:
-    """Get cards for booster pack, using cache first, then fetching new ones."""
-    # First, try to get cards from cache
-    cached_cards = _get_cached_cards_for_set(set_code, rarity, count)
+def _get_cards_for_pack(set_code: str, rarity: str, count: int, exclude_ids: set = None) -> list[dict]:
+    """Get cards for booster pack, using cache first, then fetching new ones. Ensures no duplicates."""
+    if exclude_ids is None:
+        exclude_ids = set()
+    
+    # First, try to get cards from cache (avoiding duplicates)
+    cached_cards = _get_cached_cards_for_set(set_code, rarity, count, exclude_ids.copy())
     
     # If we have enough cached cards, use them
     if len(cached_cards) >= count:
-        random.shuffle(cached_cards)
         print(f"[booster] Using {count} cached {rarity} cards for {set_code}")
         return cached_cards[:count]
     
@@ -546,15 +561,16 @@ def _get_cards_for_pack(set_code: str, rarity: str, count: int) -> list[dict]:
     needed = count - len(cached_cards)
     print(f"[booster] Need to fetch {needed} more {rarity} cards for {set_code} (have {len(cached_cards)} cached)")
     
-    new_cards = _get_random_cards_with_filter(set_code, rarity, needed)
+    # Update exclude_ids with cards we already got from cache
+    for card in cached_cards:
+        exclude_ids.add(card["id"])
+    
+    new_cards = _get_random_cards_with_filter(set_code, rarity, needed, exclude_ids)
     
     # Combine cached and new cards
     all_cards = cached_cards + new_cards
     
-    # Shuffle for variety
-    random.shuffle(all_cards)
-    
-    return all_cards[:count]
+    return all_cards
 
 
 # ---- Routes ----
@@ -688,17 +704,18 @@ def api_booster_single_card():
         payload = request.get_json(silent=True) or {}
         set_code = payload.get("set_code", "").strip().lower()
         rarity = payload.get("rarity", "").strip().lower()
+        exclude_ids = set(payload.get("exclude_ids", []))  # Cards already in this pack
         
         if not set_code:
             return jsonify({"error": "Missing set_code parameter"}), 400
         if not rarity:
             return jsonify({"error": "Missing rarity parameter"}), 400
         
-        print(f"[booster] Fetching single {rarity} card for {set_code}")
+        print(f"[booster] Fetching single {rarity} card for {set_code} (excluding {len(exclude_ids)} cards)")
         start_time = time.time()
         
-        # Try to get from cache first
-        cached_cards = _get_cached_cards_for_set(set_code, rarity, 1)
+        # Try to get from cache first (avoiding duplicates)
+        cached_cards = _get_cached_cards_for_set(set_code, rarity, 1, exclude_ids.copy())
         
         if cached_cards:
             card = cached_cards[0]
@@ -711,11 +728,11 @@ def api_booster_single_card():
                 "fetch_time": round(fetch_time, 3)
             })
         
-        # If no cached card, fetch a new one
-        new_cards = _get_random_cards_with_filter(set_code, rarity, 1)
+        # If no cached card, fetch a new one (avoiding duplicates)
+        new_cards = _get_random_cards_with_filter(set_code, rarity, 1, exclude_ids.copy())
         
         if not new_cards:
-            return jsonify({"error": f"No {rarity} cards found for set {set_code}"}), 404
+            return jsonify({"error": f"No unique {rarity} cards found for set {set_code}"}), 404
         
         card = new_cards[0]
         fetch_time = time.time() - start_time
