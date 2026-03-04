@@ -343,27 +343,6 @@
             return data.card;
         }
 
-        async function fetchSingleCard(setCode, rarity) {
-            const response = await fetch('/api/booster/single', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ 
-                    set_code: setCode,
-                    rarity: rarity 
-                })
-            });
-
-            const data = await response.json();
-            
-            if (data.error) {
-                throw new Error(data.error);
-            }
-
-            return data.card;
-        }
-
         function displayCard(card, slotIndex) {
             const cardSlot = document.getElementById(`card-slot-${slotIndex}`);
             if (!cardSlot) return;
