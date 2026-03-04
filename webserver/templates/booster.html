@@ -191,6 +191,10 @@
                 const option = document.createElement('option');
                 option.value = set.code;
                 option.textContent = `${set.name} (${set.released_at})`;
+                
+                // Store the entire set object for later use
+                option.setAttribute('data-icon', set.icon_svg_uri || '');
+                
                 select.appendChild(option);
             });
 
@@ -200,12 +204,23 @@
                 
                 if (this.value) {
                     const selectedSet = allSets.find(s => s.code === this.value);
-                    document.getElementById('setInfo').textContent = 
-                        `${selectedSet.card_count} cards • Released: ${selectedSet.released_at}`;
+                    updateSetInfo(selectedSet);
                 } else {
-                    document.getElementById('setInfo').textContent = '';
+                    document.getElementById('setInfo').innerHTML = '';
                 }
             });
+        }
+
+        function updateSetInfo(set) {
+            const setInfoDiv = document.getElementById('setInfo');
+            let infoHtml = `${set.card_count} cards • Released: ${set.released_at}`;
+            
+            // Add set icon if available - the icon_svg_uri is directly on the set object
+            if (set.icon_svg_uri) {
+                infoHtml = `<img src="${set.icon_svg_uri}" alt="${set.name} icon" style="width: 20px; height: 20px; margin-right: 8px; vertical-align: middle; filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.5));">` + infoHtml;
+            }
+            
+            setInfoDiv.innerHTML = infoHtml;
         }
 
         async function generatePack() {
@@ -343,25 +358,45 @@
         }
 
         async function fetchSingleCard(setCode, rarity, usedCardIds = new Set()) {
-            const response = await fetch('/api/booster/single', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ 
-                    set_code: setCode,
-                    rarity: rarity,
-                    exclude_ids: Array.from(usedCardIds) // Send list of already used card IDs
-                })
-            });
-
-            const data = await response.json();
+            let attempts = 0;
+            const maxAttempts = 20; // Prevent infinite loops
             
-            if (data.error) {
-                throw new Error(data.error);
-            }
+            while (attempts < maxAttempts) {
+                attempts++;
+                
+                const response = await fetch('/api/booster/single', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        set_code: setCode,
+                        rarity: rarity,
+                        exclude_ids: Array.from(usedCardIds)
+                    })
+                });
 
-            return data.card;
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                const card = data.card;
+                
+                // If it's a common slot and we got a land, re-roll
+                if (rarity === "common" && is_common_land) {
+                    console.log(`Re-rolling common land: ${card.name} (attempt ${attempts})`);
+                    usedCardIds.add(card.id); // Exclude this basic from future attempts
+                    continue; // Try again
+                }
+                
+                // Good card, return it
+                return card;
+            }
+            
+            // If we've exhausted attempts, throw an error
+            throw new Error(`Failed to get non-basic ${rarity} card after ${maxAttempts} attempts`);
         }
 
         function displayCard(card, slotIndex) {
@@ -397,9 +432,9 @@
         }
 
         function updateProgress(message) {
-            const progressDiv = document.getElementById('progress');
-            progressDiv.textContent = message;
-            progressDiv.style.display = 'block';
+            // const progressDiv = document.getElementById('progress');
+            // progressDiv.textContent = message;
+            // progressDiv.style.display = 'block';
         }
 
         function showLoading(show) {

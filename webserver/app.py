@@ -142,6 +142,18 @@ def _get_cached_data(cache_key: str, cache_hours: int = 24) -> dict | None:
         print(f"[cache] Error reading cache file {cache_key}: {e}")
         return None
 
+def _set_cached_data(cache_key: str, data: dict) -> None:
+    """Save data to cache."""
+    _ensure_cache_dir()
+    cache_path = _get_cache_path(cache_key)
+    
+    try:
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f)
+        print(f"[cache] Cached data for key: {cache_key}")
+    except Exception as e:
+        print(f"[cache] Error writing cache file {cache_key}: {e}")
+
 
 # ---- Image helpers ----
 
@@ -435,7 +447,7 @@ def _get_full_set_data(set_code: str) -> list[dict]:
     with _cache_lock:
         cached_set = _get_cached_data(cache_key, cache_hours=24 * CACHE_EXPIRY_DAYS)
         if cached_set is not None:
-            print(f"[booster] ✅ CACHE HIT: Using cached set data for {set_code} ({len(cached_set)} cards)")
+            # print(f"[booster] ✅ CACHE HIT: Using cached set data for {set_code} ({len(cached_set)} cards)")
             return cached_set
     
     print(f"[booster] 📦 DOWNLOADING: Fetching full set data for {set_code}...")
@@ -459,16 +471,22 @@ def _get_full_set_data(set_code: str) -> list[dict]:
                 
             # Process and add cards from this page
             for card in cards_data:
-                # Only include cards with images and basic rarities
-                if card.get("image_uris") and card.get("rarity") in ["common", "uncommon", "rare", "mythic"]:
+                # Include ALL cards with images and basic rarities
+                if (card.get("image_uris") and 
+                    card.get("rarity") in ["common", "uncommon", "rare", "mythic"]):
+                    
+                    type_line = card.get("type_line", "")
+                    rarity = card.get("rarity", "")
+                    
                     processed_card = {
                         "id": card.get("id"),
                         "name": card.get("name", "Unknown"),
                         "image_url": _pick_image_border_crop_only(card.get("image_uris", {})),
-                        "rarity": card.get("rarity"),
+                        "rarity": rarity,
                         "set": set_code,
                         "mana_cost": card.get("mana_cost", ""),
-                        "type_line": card.get("type_line", "")
+                        "type_line": type_line,
+                        "is_common_land": (rarity == "common" and "Land" in type_line)  # Flag common lands
                     }
                     if processed_card["image_url"]:  # Only add if we have a valid image
                         all_cards.append(processed_card)
