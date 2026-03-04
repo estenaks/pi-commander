@@ -198,18 +198,13 @@
     </div>
 
     <script>
-        let allSets = [];
-        let currentGeneration = null;
         let packSize = 15;
-        let packFaceUp = false;
 
         function flipAll() {
             for (let i = 0; i < packSize; i++) {
                 const slot = document.getElementById(`card-slot-${i}`);
                 if (slot) slot.click();
             }
-            packFaceUp = !packFaceUp;
-            document.getElementById('flipAllBtn').textContent = packFaceUp ? 'Flip All Back' : 'Flip All';
         }
 
         const PREMIUM_CHANCE = 0.50; // 50% chance of premium foil slot replacing 10th common
@@ -329,7 +324,6 @@
         }
 
         function setupPackGrid(isPremium) {
-            packFaceUp = false;
             document.getElementById('flipAllBtn').style.display = 'none';
             document.getElementById('flipAllBtn').textContent = 'Flip All';
             const grid = document.getElementById('packGrid');
@@ -419,7 +413,7 @@
                 }
             }
 
-            // Generate land (1 card)
+            // Generate land (1 card) — fall back to common if set has no common lands
             if (!generation.cancelled) {
                 updateProgress('Fetching common land...');
                 try {
@@ -430,7 +424,18 @@
                         generation.cardCount++;
                     }
                 } catch (error) {
-                    console.error('Failed to fetch land:', error);
+                    // No common lands in this set — replace with an extra common
+                    console.log('No common lands in this set, replacing land slot with common');
+                    try {
+                        const card = await fetchSingleCard(setCode, 'common', usedCardIds);
+                        if (!generation.cancelled && card) {
+                            displayCard(card, commonCount + 4);
+                            usedCardIds.add(card.id);
+                            generation.cardCount++;
+                        }
+                    } catch (fallbackError) {
+                        console.error('Failed to fetch fallback common for land slot:', fallbackError);
+                    }
                 }
             }
 
@@ -516,8 +521,15 @@
             cardSlot.innerHTML = '';
             cardSlot.className = 'card-slot';
 
+            // Faces: for DFC [front, back], for single-faced [front, cardback]
+            const faces = [
+                card.image_url,
+                card.back_image_url || '/cardback.jpg'
+            ];
+            const isDFC = !!card.back_image_url;
+
             const img = document.createElement('img');
-            img.src = '/cardback.jpg';
+            img.src = '/cardback.jpg';  // always start face-down
             img.alt = 'Card back';
             img.title = 'Click to reveal';
 
@@ -525,56 +537,72 @@
             const displayRarity = card.type_line && card.type_line.includes('Land') ? 'land' : card.rarity;
             rarityBadge.className = `card-rarity rarity-${displayRarity}`;
             rarityBadge.textContent = isFoil ? '✨' : (displayRarity === 'land' ? 'L' : card.rarity[0].toUpperCase());
-            rarityBadge.style.display = 'none'; // hidden until revealed
+            rarityBadge.style.display = 'none';
 
             cardSlot.appendChild(img);
             cardSlot.appendChild(rarityBadge);
 
-            let isFaceUp = false;
+            // -1 = face-down (cardback), 0 = front, 1 = back
+            let faceIndex = -1;
 
             img.onload = () => {
                 img.classList.add('loaded');
             };
 
-            cardSlot.addEventListener('click', () => {
-                if (img.classList.contains('flipping-out') || img.classList.contains('flipping-in')) return;
+            function flipTo(nextIndex) {
+                const nextSrc = nextIndex === -1 ? '/cardback.jpg' : faces[nextIndex];
 
-                if (!isFaceUp) {
-                    // Preload the front image before animating
-                    const preload = new Image();
-                    preload.onload = () => {
-                        img.classList.add('flipping-out');
-                        img.addEventListener('animationend', () => {
-                            img.classList.remove('flipping-out');
-                            img.src = card.image_url;
-                            img.alt = card.name;
-                            img.title = `${card.name} - ${card.rarity}${isFoil ? ' ✨' : ''}`;
-                            rarityBadge.style.display = '';
-                            if (isFoil) cardSlot.classList.add('foil');
-                            isFaceUp = true;
-                            img.classList.add('flipping-in');
-                            img.addEventListener('animationend', () => {
-                                img.classList.remove('flipping-in');
-                            }, { once: true });
-                        }, { once: true });
-                    };
-                    preload.src = card.image_url;
-                } else {
-                    // Card back is already cached, no preload needed
+                const preload = new Image();
+                preload.onload = () => {
                     img.classList.add('flipping-out');
                     img.addEventListener('animationend', () => {
                         img.classList.remove('flipping-out');
-                        img.src = '/cardback.jpg';
-                        img.alt = 'Card back';
-                        img.title = 'Click to reveal';
-                        rarityBadge.style.display = 'none';
-                        cardSlot.classList.remove('foil');
-                        isFaceUp = false;
+                        img.src = nextSrc;
+
+                        if (nextIndex === -1) {
+                            // face-down
+                            img.alt = 'Card back';
+                            img.title = 'Click to reveal';
+                            rarityBadge.style.display = 'none';
+                            cardSlot.classList.remove('foil');
+                        } else if (nextIndex === 0) {
+                            // front face
+                            img.alt = card.name;
+                            img.title = isDFC
+                                ? `${card.name} - click to see back face`
+                                : `${card.name} - ${card.rarity}${isFoil ? ' ✨' : ''}`;
+                            rarityBadge.style.display = '';
+                            if (isFoil) cardSlot.classList.add('foil');
+                        } else {
+                            // back face (DFC only)
+                            img.alt = `${card.name} (back face)`;
+                            img.title = `${card.name} - click to flip back`;
+                            rarityBadge.style.display = '';
+                            if (isFoil) cardSlot.classList.add('foil');
+                        }
+
+                        faceIndex = nextIndex;
                         img.classList.add('flipping-in');
                         img.addEventListener('animationend', () => {
                             img.classList.remove('flipping-in');
                         }, { once: true });
                     }, { once: true });
+                };
+                preload.src = nextSrc;
+            }
+
+            cardSlot.addEventListener('click', () => {
+                if (img.classList.contains('flipping-out') || img.classList.contains('flipping-in')) return;
+
+                if (faceIndex === -1) {
+                    // face-down → reveal front
+                    flipTo(0);
+                } else if (faceIndex === 0 && isDFC) {
+                    // front → back (DFC only)
+                    flipTo(1);
+                } else {
+                    // front (single) or back (DFC) → face-down
+                    flipTo(-1);
                 }
             });
         }

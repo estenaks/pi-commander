@@ -31,7 +31,9 @@ SCRYFALL_REQUEST_DELAY = 0.050  # 50ms delay between requests
 # Set exclusion list - sets to exclude from booster generation
 EXCLUDED_SET_CODES = {
     # Manually excluded sets (add more as needed)
-    "pred"
+    "pred",
+    "h17",
+    "phtr"
     # Commander sets are excluded by name filter below
 }
 
@@ -477,25 +479,40 @@ def _get_full_set_data(set_code: str) -> list[dict]:
                 
             # Process and add cards from this page
             for card in cards_data:
-                # Include ALL cards with images and basic rarities
-                if (card.get("image_uris") and 
-                    card.get("rarity") in ["common", "uncommon", "rare", "mythic"]):
-                    
-                    type_line = card.get("type_line", "")
-                    rarity = card.get("rarity", "")
-                    
-                    processed_card = {
-                        "id": card.get("id"),
-                        "name": card.get("name", "Unknown"),
-                        "image_url": _pick_image_border_crop_only(card.get("image_uris", {})),
-                        "rarity": rarity,
-                        "set": set_code,
-                        "mana_cost": card.get("mana_cost", ""),
-                        "type_line": type_line,
-                        "is_common_land": (rarity == "common" and "Land" in type_line)  # Flag common lands
-                    }
-                    if processed_card["image_url"]:  # Only add if we have a valid image
-                        all_cards.append(processed_card)
+                rarity = card.get("rarity", "")
+                if rarity not in ["common", "uncommon", "rare", "mythic"]:
+                    continue
+
+                type_line = card.get("type_line", "")
+
+                # Single-faced card
+                if card.get("image_uris"):
+                    front_url = _pick_image_border_crop_only(card.get("image_uris", {}))
+                    back_url = None  # use cardback.jpg on frontend
+                # Double-faced card — images live on card_faces
+                elif card.get("card_faces") and len(card["card_faces"]) >= 2:
+                    f0 = card["card_faces"][0]
+                    f1 = card["card_faces"][1]
+                    front_url = _pick_image_border_crop_only(f0.get("image_uris") or {})
+                    back_url = _pick_image_border_crop_only(f1.get("image_uris") or {})
+                else:
+                    continue  # no usable image
+
+                if not front_url:
+                    continue
+
+                processed_card = {
+                    "id": card.get("id"),
+                    "name": card.get("name", "Unknown"),
+                    "image_url": front_url,
+                    "back_image_url": back_url,  # None for single-faced, URL for DFC
+                    "rarity": rarity,
+                    "set": set_code,
+                    "mana_cost": card.get("mana_cost", ""),
+                    "type_line": type_line,
+                    "is_common_land": (rarity == "common" and "Land" in type_line)
+                }
+                all_cards.append(processed_card)
             
             # Check if there are more pages
             if not response.get("has_more", False):
@@ -678,7 +695,8 @@ def api_booster_sets():
             if (set_name.endswith("commander") or 
                 (set_name.startswith("commander") and any(char.isdigit() for char in set_name)) or
                 " commander" in set_name or
-                "jumpstart" in set_name):
+                "jumpstart" in set_name or
+                "etarnal" in set_name):
                 continue
             
             if set_type in ["expansion", "core", "masters", "draft_innovation", "commander", "funny", "starter", "eternal"]:
@@ -772,7 +790,13 @@ def api_booster_single_card():
         rarity_pool = _get_cards_by_rarity_from_set(set_cards, rarity)
         if not rarity_pool:
             return jsonify({"error": f"No {rarity} cards found for set {set_code}"}), 404
-        
+
+        # For common slots, exclude common lands — those belong in the land slot only
+        if rarity == "common":
+            rarity_pool = [card for card in rarity_pool if not card.get("is_common_land")]
+            if not rarity_pool:
+                return jsonify({"error": f"No non-land common cards found for set {set_code}"}), 404
+
         selected_cards = _select_random_cards_from_pool(rarity_pool, 1, exclude_ids)
         
         if not selected_cards:
