@@ -524,28 +524,6 @@ def _get_cards_by_rarity_from_set(set_cards: list[dict], rarity: str) -> list[di
     return [card for card in set_cards if card.get("rarity") == rarity]
 
 
-def _select_random_cards_from_pool(card_pool: list[dict], count: int, exclude_ids: set = None) -> list[dict]:
-    """Select random cards from a pool, avoiding duplicates."""
-    if exclude_ids is None:
-        exclude_ids = set()
-    
-    # Filter out already used cards
-    available_cards = [card for card in card_pool if card["id"] not in exclude_ids]
-    
-    if len(available_cards) < count:
-        print(f"[booster] Warning: Only {len(available_cards)} cards available, requested {count}")
-        return available_cards
-    
-    # Randomly select without replacement
-    selected = random.sample(available_cards, count)
-    
-    # Mark as used
-    for card in selected:
-        exclude_ids.add(card["id"])
-    
-    return selected
-
-
 def _has_mythic_rares(set_cards: list[dict]) -> bool:
     """Check if a set has any mythic rare cards."""
     return any(card.get("rarity") == "mythic" for card in set_cards)
@@ -700,55 +678,6 @@ def api_booster_sets():
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-@app.post("/api/booster/generate")
-def api_booster_generate():
-    """Generate a complete booster pack (legacy endpoint - consider using /api/booster/single for progressive loading)."""
-    try:
-        payload = request.get_json(silent=True) or {}
-        set_code = payload.get("set_code", "").strip().lower()
-        
-        if not set_code:
-            return jsonify({"error": "Missing set_code parameter"}), 400
-        
-        print(f"[booster] Generating complete pack for set: {set_code}")
-        start_time = time.time()
-        
-        # Generate the booster pack: 9 commons, 3 uncommons
-        commons = _get_cards_for_pack(set_code, "common", 9)
-        uncommons = _get_cards_for_pack(set_code, "uncommon", 3)
-        
-        # Combine and shuffle
-        all_cards = commons + uncommons
-        random.shuffle(all_cards)
-        
-        generation_time = time.time() - start_time
-        
-        if len(all_cards) < 12:
-            print(f"[booster] Warning: Only got {len(all_cards)}/12 cards for {set_code}")
-            if len(all_cards) == 0:
-                return jsonify({"error": f"No cards found for set {set_code}. Try a different set."}), 404
-        
-        print(f"[booster] Generated complete pack in {generation_time:.2f}s")
-        
-        return jsonify({
-            "set_code": set_code,
-            "cards": all_cards,
-            "pack_size": len(all_cards),
-            "breakdown": {
-                "commons": len(commons),
-                "uncommons": len(uncommons)
-            },
-            "generation_time": round(generation_time, 2),
-            "cache_size_gb": round(_get_cache_size_gb(), 2),
-            "note": "Consider using /api/booster/single for progressive loading"
-        })
-        
-    except Exception as e:
-        print(f"[booster] Error generating pack: {e}", file=sys.stderr)
-        return jsonify({"error": str(e)}), 500
-
 
 @app.post("/api/booster/single")
 def api_booster_single_card():
@@ -982,7 +911,6 @@ def _print_endpoints(host: str, port: int) -> None:
         f"    POST {base}/api/search/<player>",
         f"    POST {base}/api/random/<player>",
         f"    GET  {base}/api/booster/sets",
-        f"    POST {base}/api/booster/generate",
         f"    POST {base}/api/booster/single",
         "",
         f"  BMP",
