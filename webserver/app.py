@@ -8,6 +8,9 @@ import io
 import os
 import sys
 import qrcode
+import time
+import random
+from datetime import datetime, timedelta
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -19,6 +22,18 @@ CARD_BACK_WEB_URL = "/cardback.jpg"   # served to browser / used in faces_meta
 CONFIG_PORT = ""
 
 PLAYERS = [1, 2, 3, 4]
+
+# Cache configuration
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
+MAX_CACHE_SIZE_GB = 20
+CACHE_EXPIRY_DAYS = 365
+SCRYFALL_REQUEST_DELAY = 0.050  # 50ms delay between requests
+# Set exclusion list - sets to exclude from booster generation
+EXCLUDED_SET_CODES = {
+    # Manually excluded sets (add more as needed)
+    "pred"
+    # Commander sets are excluded by name filter below
+}
 
 _state_lock = threading.Lock()
 _state_by_player = {
@@ -37,6 +52,113 @@ _state_by_player = {
 # BMP cache: keyed by (player, face) where face is "front" or "back"
 # Protected by _state_lock
 _bmp_cache: dict[tuple[int, str], bytes] = {}
+
+# Scryfall cache: keyed by cache filename
+_cache_lock = threading.Lock()
+
+def _ensure_cache_dir():
+    """Ensure the cache directory exists."""
+    os.makedirs(CACHE_DIR, exist_ok=True)
+
+def _get_cache_path(cache_key: str) -> str:
+    """Get the full path for a cache file."""
+    return os.path.join(CACHE_DIR, f"{cache_key}.json")
+
+def _get_cache_size_gb() -> float:
+    """Get current cache size in GB."""
+    if not os.path.exists(CACHE_DIR):
+        return 0.0
+    
+    total_size = 0
+    for filename in os.listdir(CACHE_DIR):
+        file_path = os.path.join(CACHE_DIR, filename)
+        if os.path.isfile(file_path):
+            total_size += os.path.getsize(file_path)
+    
+    return total_size / (1024 ** 3)  # Convert to GB
+
+def _cleanup_old_cache():
+    """Remove cache files older than CACHE_EXPIRY_DAYS or if cache is too large."""
+    if not os.path.exists(CACHE_DIR):
+        return
+    
+    now = datetime.now()
+    files_info = []
+    
+    # Get info about all cache files
+    for filename in os.listdir(CACHE_DIR):
+        if not filename.endswith('.json'):
+            continue
+            
+        file_path = os.path.join(CACHE_DIR, filename)
+        if os.path.isfile(file_path):
+            mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
+            size = os.path.getsize(file_path)
+            files_info.append((file_path, mtime, size))
+    
+    # Remove files older than expiry
+    for file_path, mtime, _ in files_info:
+        if now - mtime > timedelta(days=CACHE_EXPIRY_DAYS):
+            try:
+                os.remove(file_path)
+                print(f"[cache] Removed expired cache file: {os.path.basename(file_path)}")
+            except Exception as e:
+                print(f"[cache] Failed to remove expired file {file_path}: {e}")
+    
+    # If still too large, remove oldest files
+    current_size = _get_cache_size_gb()
+    if current_size > MAX_CACHE_SIZE_GB:
+        # Sort by modification time (oldest first)
+        files_info.sort(key=lambda x: x[1])
+        
+        for file_path, _, size in files_info:
+            if current_size <= MAX_CACHE_SIZE_GB:
+                break
+                
+            try:
+                os.remove(file_path)
+                current_size -= size / (1024 ** 3)
+                print(f"[cache] Removed old cache file to free space: {os.path.basename(file_path)}")
+            except Exception as e:
+                print(f"[cache] Failed to remove file {file_path}: {e}")
+
+def _get_cached_data(cache_key: str, cache_hours: int = 24) -> dict | None:
+    """Get data from cache if it exists and is not expired."""
+    cache_path = _get_cache_path(cache_key)
+    
+    if not os.path.exists(cache_path):
+        return None
+    
+    try:
+        # Never expire set data (they're permanent)
+        if cache_key.startswith("set_") and cache_key.endswith("_full"):
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        
+        # Check if file is too old based on cache_hours parameter
+        mtime = datetime.fromtimestamp(os.path.getmtime(cache_path))
+        if datetime.now() - mtime > timedelta(hours=cache_hours):
+            os.remove(cache_path)
+            print(f"[cache] Removed expired cache file: {cache_key} (older than {cache_hours} hours)")
+            return None
+        
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[cache] Error reading cache file {cache_key}: {e}")
+        return None
+
+def _set_cached_data(cache_key: str, data: dict) -> None:
+    """Save data to cache."""
+    _ensure_cache_dir()
+    cache_path = _get_cache_path(cache_key)
+    
+    try:
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f)
+        print(f"[cache] Cached data for key: {cache_key}")
+    except Exception as e:
+        print(f"[cache] Error writing cache file {cache_key}: {e}")
 
 
 # ---- Image helpers ----
@@ -152,7 +274,20 @@ def _require_player(player: int) -> int:
     return player
 
 
-def _scryfall_get(url: str) -> dict:
+def _scryfall_get(url: str, use_cache: bool = False, cache_key: str = None, cache_hours: int = 24) -> dict:
+    """Make a GET request to Scryfall with optional caching."""
+    
+    # Check cache first if enabled
+    if use_cache and cache_key:
+        with _cache_lock:
+            cached_data = _get_cached_data(cache_key, cache_hours)
+            if cached_data is not None:
+                print(f"[cache] Using cached data for: {cache_key}")
+                return cached_data
+    
+    # Add rate limiting delay
+    time.sleep(SCRYFALL_REQUEST_DELAY)
+    
     req = urllib.request.Request(
         url,
         headers={
@@ -161,10 +296,19 @@ def _scryfall_get(url: str) -> dict:
         },
         method="GET",
     )
+    
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = resp.read().decode("utf-8")
-            return json.loads(data)
+            result = json.loads(data)
+            
+        # Cache the result if caching is enabled
+        if use_cache and cache_key:
+            with _cache_lock:
+                _set_cached_data(cache_key, result)
+                
+        return result
+        
     except urllib.error.HTTPError as e:
         body = ""
         try:
@@ -289,6 +433,181 @@ def _set_player_state(player: int, *, last_query: str, card: dict) -> dict:
     return result
 
 
+# ---- Booster pack helpers ----
+
+def _get_all_sets() -> list[dict]:
+    """Get all Magic sets from Scryfall with 1-day caching."""
+    return _scryfall_get(
+        "https://api.scryfall.com/sets",
+        use_cache=True,
+        cache_key="all_sets",
+        cache_hours=24  # Cache sets list for only 1 day
+    ).get("data", [])
+
+
+def _get_full_set_data(set_code: str) -> list[dict]:
+    """Get all cards from a set, with permanent caching."""
+    cache_key = f"set_{set_code}_full"
+    
+    # Check cache first (never expires for sets)
+    with _cache_lock:
+        cached_set = _get_cached_data(cache_key, cache_hours=24 * CACHE_EXPIRY_DAYS)
+        if cached_set is not None:
+            # print(f"[booster] ✅ CACHE HIT: Using cached set data for {set_code} ({len(cached_set)} cards)")
+            return cached_set
+    
+    print(f"[booster] 📦 DOWNLOADING: Fetching full set data for {set_code}...")
+    all_cards = []
+    page = 1
+    
+    while True:
+        try:
+            # Fetch cards page by page
+            url = f"https://api.scryfall.com/cards/search?q=set:{set_code}&page={page}"
+            print(f"[booster] Fetching page {page} for set {set_code}...")
+            
+            # Add delay for rate limiting
+            time.sleep(SCRYFALL_REQUEST_DELAY)
+            
+            response = _scryfall_get(url, use_cache=False)  # Don't cache individual pages
+            
+            cards_data = response.get("data", [])
+            if not cards_data:
+                break
+                
+            # Process and add cards from this page
+            for card in cards_data:
+                # Include ALL cards with images and basic rarities
+                if (card.get("image_uris") and 
+                    card.get("rarity") in ["common", "uncommon", "rare", "mythic"]):
+                    
+                    type_line = card.get("type_line", "")
+                    rarity = card.get("rarity", "")
+                    
+                    processed_card = {
+                        "id": card.get("id"),
+                        "name": card.get("name", "Unknown"),
+                        "image_url": _pick_image_border_crop_only(card.get("image_uris", {})),
+                        "rarity": rarity,
+                        "set": set_code,
+                        "mana_cost": card.get("mana_cost", ""),
+                        "type_line": type_line,
+                        "is_common_land": (rarity == "common" and "Land" in type_line)  # Flag common lands
+                    }
+                    if processed_card["image_url"]:  # Only add if we have a valid image
+                        all_cards.append(processed_card)
+            
+            # Check if there are more pages
+            if not response.get("has_more", False):
+                break
+                
+            page += 1
+            
+        except Exception as e:
+            print(f"[booster] Error fetching page {page} for set {set_code}: {e}")
+            if page == 1:
+                # If we can't even get the first page, return empty
+                return []
+            break
+    
+    print(f"[booster] ✅ DOWNLOADED: Set {set_code} complete ({len(all_cards)} cards)")
+    
+    # Cache the complete set permanently
+    with _cache_lock:
+        _set_cached_data(cache_key, all_cards)
+    
+    return all_cards
+
+
+def _get_cards_by_rarity_from_set(set_cards: list[dict], rarity: str) -> list[dict]:
+    """Filter cards by rarity from a complete set."""
+    return [card for card in set_cards if card.get("rarity") == rarity]
+
+def _select_random_cards_from_pool(card_pool: list[dict], count: int, exclude_ids: set = None) -> list[dict]:
+    """Select random cards from a pool, avoiding duplicates."""
+    if exclude_ids is None:
+        exclude_ids = set()
+    
+    # Filter out already used cards
+    available_cards = [card for card in card_pool if card["id"] not in exclude_ids]
+    
+    if len(available_cards) < count:
+        print(f"[booster] Warning: Only {len(available_cards)} cards available, requested {count}")
+        return available_cards
+    
+    # Randomly select without replacement
+    selected = random.sample(available_cards, count)
+    
+    # Mark as used
+    for card in selected:
+        exclude_ids.add(card["id"])
+    
+    return selected
+
+def _has_mythic_rares(set_cards: list[dict]) -> bool:
+    """Check if a set has any mythic rare cards."""
+    return any(card.get("rarity") == "mythic" for card in set_cards)
+
+
+def _get_rare_or_mythic_card_from_set(set_cards: list[dict], exclude_ids: set = None) -> dict | None:
+    """Get a rare card with 1/8 chance of being mythic, from cached set data."""
+    if exclude_ids is None:
+        exclude_ids = set()
+    
+    # Check if set has mythics
+    has_mythics = _has_mythic_rares(set_cards)
+    
+    # 1/8 chance for mythic (12.5%) - but only if set has mythics
+    try_mythic = has_mythics and (random.randint(1, 8) == 1)
+    
+    if try_mythic:
+        mythic_pool = _get_cards_by_rarity_from_set(set_cards, "mythic")
+        available_mythics = [card for card in mythic_pool if card["id"] not in exclude_ids]
+        
+        if available_mythics:
+            selected = random.choice(available_mythics)
+            exclude_ids.add(selected["id"])
+            print(f"[booster] Selected mythic rare: {selected['name']}")
+            return selected
+        else:
+            print(f"[booster] No available mythic rares (all in exclude list), falling back to rare")
+    
+    # Fall back to rare
+    rare_pool = _get_cards_by_rarity_from_set(set_cards, "rare")
+    available_rares = [card for card in rare_pool if card["id"] not in exclude_ids]
+    
+    if available_rares:
+        selected = random.choice(available_rares)
+        exclude_ids.add(selected["id"])
+        print(f"[booster] Selected rare: {selected['name']}")
+        return selected
+    
+    print(f"[booster] No available rare cards!")
+    return None
+
+def _get_common_land_from_set(set_cards: list[dict], exclude_ids: set = None) -> dict | None:
+    """Get a random common land from the set."""
+    if exclude_ids is None:
+        exclude_ids = set()
+    
+    # Get all common lands (includes both basic and non-basic)
+    common_lands = [card for card in set_cards 
+                   if card.get("rarity") == "common" and 
+                      "Land" in card.get("type_line", "")]
+    
+    # Filter out excluded cards
+    available_lands = [card for card in common_lands if card["id"] not in exclude_ids]
+    
+    if not available_lands:
+        print(f"[booster] No available common lands found")
+        return None
+    
+    # Just pick a random common land
+    selected = random.choice(available_lands)
+    exclude_ids.add(selected["id"])
+    print(f"[booster] Selected common land: {selected['name']}")
+    return selected
+
 # ---- Routes ----
 
 @app.get("/cardback.jpg")
@@ -324,6 +643,154 @@ def player4():
 @app.get("/config")
 def config():
     return render_template("config.html")
+
+
+@app.get("/booster")
+def booster():
+    return render_template("booster.html")
+
+
+# ---- Booster API endpoints ----
+
+@app.get("/api/booster/sets")
+def api_booster_sets():
+    """Get all available Magic sets for booster generation."""
+    try:
+        with _cache_lock:
+            _cleanup_old_cache()  # Clean up old cache files periodically
+            
+        sets_data = _get_all_sets()
+        
+        # Filter to sets that are likely to have cards available for random generation
+        # Focus on regular expansion sets and avoid things like promos, tokens, etc.
+        eligible_sets = []
+        for set_data in sets_data:
+            set_type = set_data.get("set_type", "")
+            set_code = set_data.get("code", "").lower()
+            set_name = set_data.get("name", "").lower()
+            
+            # Skip excluded sets
+            if set_code in EXCLUDED_SET_CODES:
+                continue
+                
+            # Skip commander precon sets (but allow commander booster sets like "Commander Legends")
+            # and skip jumpstart sets
+            if (set_name.endswith("commander") or 
+                (set_name.startswith("commander") and any(char.isdigit() for char in set_name)) or
+                " commander" in set_name or
+                "jumpstart" in set_name):
+                continue
+            
+            if set_type in ["expansion", "core", "masters", "draft_innovation", "commander", "funny", "starter", "eternal"]:
+                eligible_sets.append({
+                    "code": set_data.get("code"),
+                    "name": set_data.get("name"),
+                    "released_at": set_data.get("released_at"),
+                    "card_count": set_data.get("card_count", 0),
+                    "set_type": set_type,
+                    "icon_svg_uri": set_data.get("icon_svg_uri", "")  # Add icon
+                })
+        
+        return jsonify({
+            "sets": eligible_sets,
+            "cache_size_gb": round(_get_cache_size_gb(), 2)
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.post("/api/booster/single")
+def api_booster_single_card():
+    """Get a single random card for progressive pack generation."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        set_code = payload.get("set_code", "").strip().lower()
+        rarity = payload.get("rarity", "").strip().lower()
+        exclude_ids = set(payload.get("exclude_ids", []))  # Cards already in this pack
+        
+        if not set_code:
+            return jsonify({"error": "Missing set_code parameter"}), 400
+        if not rarity:
+            return jsonify({"error": "Missing rarity parameter"}), 400
+        
+        print(f"[booster] Fetching single {rarity} card for {set_code} (excluding {len(exclude_ids)} cards)")
+        start_time = time.time()
+        
+        # Get the complete cached set data
+        set_cards = _get_full_set_data(set_code)
+        
+        if not set_cards:
+            return jsonify({"error": f"No cards found for set {set_code}"}), 404
+        
+        # Handle rare/mythic logic
+        if rarity == "rare":
+            card = _get_rare_or_mythic_card_from_set(set_cards, exclude_ids)
+            if not card:
+                return jsonify({"error": f"No available rare or mythic cards for set {set_code}"}), 404
+                
+            fetch_time = time.time() - start_time
+            print(f"[booster] Selected {card['rarity']} card in {fetch_time:.3f}s: {card['name']}")
+            
+            return jsonify({
+                "card": card,
+                "from_cache": True,  # Now everything comes from cache
+                "fetch_time": round(fetch_time, 3)
+            })
+        
+        # Handle basic land logic
+        if rarity == "land":
+            card = _get_common_land_from_set(set_cards, exclude_ids)
+            if not card:
+                return jsonify({"error": f"No available land cards for set {set_code}"}), 404
+                
+            fetch_time = time.time() - start_time
+            print(f"[booster] Selected land card in {fetch_time:.3f}s: {card['name']}")
+            
+            return jsonify({
+                "card": card,
+                "from_cache": True,
+                "fetch_time": round(fetch_time, 3)
+            })
+
+        # Handle "any" rarity for premium slot — no rarity restriction
+        if rarity == "any":
+            available = [card for card in set_cards if card["id"] not in exclude_ids]
+            if not available:
+                return jsonify({"error": f"No available cards for set {set_code}"}), 404
+
+            card = random.choice(available)
+            fetch_time = time.time() - start_time
+            print(f"[booster] Selected premium card in {fetch_time:.3f}s: {card['name']} ({card['rarity']})")
+
+            return jsonify({
+                "card": card,
+                "from_cache": True,
+                "fetch_time": round(fetch_time, 3)
+            })
+        
+        # Handle common/uncommon
+        rarity_pool = _get_cards_by_rarity_from_set(set_cards, rarity)
+        if not rarity_pool:
+            return jsonify({"error": f"No {rarity} cards found for set {set_code}"}), 404
+        
+        selected_cards = _select_random_cards_from_pool(rarity_pool, 1, exclude_ids)
+        
+        if not selected_cards:
+            return jsonify({"error": f"No available {rarity} cards for set {set_code}"}), 404
+        
+        card = selected_cards[0]
+        fetch_time = time.time() - start_time
+        print(f"[booster] Selected {rarity} card in {fetch_time:.3f}s: {card['name']}")
+        
+        return jsonify({
+            "card": card,
+            "from_cache": True,  # Everything comes from cache now
+            "fetch_time": round(fetch_time, 3)
+        })
+        
+    except Exception as e:
+        print(f"[booster] Error fetching single card: {e}", file=sys.stderr)
+        return jsonify({"error": str(e)}), 500
 
 
 # ---- API (per-player) ----
@@ -472,12 +939,15 @@ def _print_endpoints(host: str, port: int) -> None:
         f"    {base}/player3",
         f"    {base}/player4",
         f"    {base}/config",
+        f"    {base}/booster",
         f"    {base}/cardback.jpg",
         "",
         f"  API",
         f"    GET  {base}/api/current/<player>",
         f"    POST {base}/api/search/<player>",
         f"    POST {base}/api/random/<player>",
+        f"    GET  {base}/api/booster/sets",
+        f"    POST {base}/api/booster/single",
         "",
         f"  BMP",
         f"    GET  {base}/bmp/all",
@@ -491,5 +961,9 @@ def _print_endpoints(host: str, port: int) -> None:
 
 
 if __name__ == "__main__":
+    # Clean up cache on startup
+    with _cache_lock:
+        _cleanup_old_cache()
+    
     _print_endpoints("0.0.0.0", 8000)
     app.run(host="0.0.0.0", port=8000, debug=False)

@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Booster Pack Simulator - Pi Commander</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #1a1a1a;
+            color: #fff;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .controls {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        select, button {
+            padding: 10px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        select {
+            background: #3a3a3a;
+            color: #fff;
+            min-width: 300px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            padding: 12px 20px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        .random-btn {
+            background: #ff6b35;
+        }
+        .random-btn:hover {
+            background: #e85a2b;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            font-style: italic;
+        }
+        .error {
+            color: #ff6b6b;
+            padding: 10px;
+            background: #2a1a1a;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .progress {
+            margin: 10px 0;
+            font-size: 14px;
+            color: #ccc;
+        }
+        .pack-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .card-slot {
+            aspect-ratio: 63/88;
+            border: 2px solid #444;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #2a2a2a;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+        .card-slot.loading {
+            background: linear-gradient(45deg, #2a2a2a, #3a3a3a, #2a2a2a);
+            background-size: 200% 200%;
+            animation: shimmer 1.5s infinite;
+        }
+        .card-slot.loaded {
+            border-color: #4CAF50;
+            transform: scale(1.02);
+        }
+        @keyframes shimmer {
+            0% { background-position: 0% 0%; }
+            50% { background-position: 100% 100%; }
+            100% { background-position: 0% 0%; }
+        }
+        .card-slot img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        .card-slot img.loaded {
+            opacity: 1;
+        }
+        .card-rarity {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .rarity-common { background: #8cc8ff; color: #000; }
+        .rarity-uncommon { background: #c0c0c0; color: #000; }
+        .rarity-rare { background: #ffb366; color: #000; }
+        .rarity-mythic { background: #ff6b35; color: #fff; }
+        .rarity-land { background: #8b4513; color: #000; }
+        .loading-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 12px;
+            color: #ccc;
+        }
+        /* Foil overlay for premium slot */
+        .card-slot.foil::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 10px;
+            background: linear-gradient(
+                135deg,
+                rgba(255,0,0,0.10) 0%,
+                rgba(255,165,0,0.10) 20%,
+                rgba(255,255,0,0.10) 40%,
+                rgba(0,255,0,0.10) 60%,
+                rgba(0,0,255,0.10) 80%,
+                rgba(148,0,211,0.10) 100%
+            );
+            background-size: 200% 200%;
+            pointer-events: none;
+            animation: foilShimmer 4s linear infinite;
+        }
+        @keyframes foilShimmer {
+            0%   { opacity: 0.6; background-position: 0% 50%; }
+            50%  { opacity: 1.0; background-position: 100% 50%; }
+            100% { opacity: 0.6; background-position: 0% 50%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Booster Pack Simulator</h1>
+        
+        <div class="controls">
+            <div>
+                <label for="setSelect">Choose a Set:</label>
+                <select id="setSelect">
+                    <option value="">Loading sets...</option>
+                </select>
+                <button id="generateBtn" disabled onclick="generatePack()">Generate Pack</button>
+                <button id="randomBtn" class="random-btn" onclick="generateRandomPack()">Random Set Pack</button>
+            </div>
+            <div id="setInfo" style="margin-top: 10px; font-size: 14px; color: #ccc;"></div>
+            <div id="progress" class="progress" style="display: none;"></div>
+        </div>
+
+        <div id="loading" class="loading" style="display: none;">
+            Preparing your booster pack...
+        </div>
+
+        <div id="error" class="error" style="display: none;"></div>
+
+        <div id="packGrid" class="pack-grid"></div>
+    </div>
+
+    <script>
+        let allSets = [];
+        let currentGeneration = null;
+        let packSize = 15;
+
+        const PREMIUM_CHANCE = 0.50; // 50% chance of premium foil slot replacing 10th common
+
+        function rollPremium() {
+            return Math.random() < PREMIUM_CHANCE ? 'premium' : 'common';
+        }
+
+        // Load sets on page load
+        async function loadSets() {
+            try {
+                const response = await fetch('/api/booster/sets');
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                allSets = data.sets;
+                populateSetSelect();
+            } catch (error) {
+                showError('Failed to load sets: ' + error.message);
+            }
+        }
+
+        function populateSetSelect() {
+            const select = document.getElementById('setSelect');
+            select.innerHTML = '<option value="">-- Choose a set --</option>';
+            
+            // Sort sets by release date (newest first)
+            const sortedSets = allSets
+                .filter(set => set.card_count > 0)
+                .sort((a, b) => new Date(b.released_at) - new Date(a.released_at));
+
+            sortedSets.forEach(set => {
+                const option = document.createElement('option');
+                option.value = set.code;
+                option.textContent = `${set.name} (${set.released_at})`;
+                
+                // Store the entire set object for later use
+                option.setAttribute('data-icon', set.icon_svg_uri || '');
+                
+                select.appendChild(option);
+            });
+
+            select.addEventListener('change', function() {
+                const generateBtn = document.getElementById('generateBtn');
+                generateBtn.disabled = !this.value;
+                
+                if (this.value) {
+                    const selectedSet = allSets.find(s => s.code === this.value);
+                    updateSetInfo(selectedSet);
+                } else {
+                    document.getElementById('setInfo').innerHTML = '';
+                }
+            });
+        }
+
+        function updateSetInfo(set) {
+            const setInfoDiv = document.getElementById('setInfo');
+            let infoHtml = `${set.card_count} cards • Released: ${set.released_at}`;
+            
+            // Add set icon if available - the icon_svg_uri is directly on the set object
+            if (set.icon_svg_uri) {
+                infoHtml = `<img src="${set.icon_svg_uri}" alt="${set.name} icon" style="width: 20px; height: 20px; margin-right: 8px; vertical-align: middle; filter: drop-shadow(0px 0px 0px rgba(0,0,0,0.5));">` + infoHtml;
+            }
+            
+            setInfoDiv.innerHTML = infoHtml;
+        }
+
+        async function generatePack() {
+            const setCode = document.getElementById('setSelect').value;
+            if (!setCode) return;
+
+            await generatePackForSet(setCode);
+        }
+
+        async function generateRandomPack() {
+            const eligibleSets = allSets.filter(set => set.card_count > 50);
+            const randomSet = eligibleSets[Math.floor(Math.random() * eligibleSets.length)];
+            
+            // Update UI to show selected set
+            document.getElementById('setSelect').value = randomSet.code;
+            
+            // Use the same updateSetInfo function that handles icons
+            updateSetInfo(randomSet);
+            
+            await generatePackForSet(randomSet.code);
+        }
+
+        async function generatePackForSet(setCode) {
+            // Cancel any ongoing generation
+            if (currentGeneration) {
+                currentGeneration.cancelled = true;
+            }
+
+            // Roll for premium before anything starts
+            const isPremium = rollPremium() === 'premium';
+            currentGeneration = { cancelled: false, cardCount: 0, isPremium };
+
+            showLoading(true);
+            hideError();
+            setupPackGrid(isPremium);
+            
+            try {
+                // Start the progressive generation
+                await generatePackProgressive(setCode, currentGeneration);
+            } catch (error) {
+                if (!currentGeneration.cancelled) {
+                    showError('Failed to generate pack: ' + error.message);
+                }
+            } finally {
+                showLoading(false);
+                if (!currentGeneration.cancelled) {
+                    currentGeneration = null;
+                }
+            }
+        }
+
+        function setupPackGrid(isPremium) {
+            const grid = document.getElementById('packGrid');
+            grid.innerHTML = '';
+
+            // 15 slots total: commons fill slots 0–8 (or 0–9), then uncommons, rare, land, [premium]
+            for (let i = 0; i < packSize; i++) {
+                const cardSlot = document.createElement('div');
+                cardSlot.className = 'card-slot loading';
+                cardSlot.id = `card-slot-${i}`;
+                
+                const loadingText = document.createElement('div');
+                loadingText.className = 'loading-text';
+
+                if (isPremium) {
+                    // 9 commons, 3 uncommons, 1 rare, 1 land, 1 premium
+                    if (i < 9)       loadingText.textContent = 'Common';
+                    else if (i < 12) loadingText.textContent = 'Uncommon';
+                    else if (i < 13) loadingText.textContent = 'Rare';
+                    else if (i < 14) loadingText.textContent = 'Land';
+                    else             loadingText.textContent = '✨';
+                } else {
+                    // 10 commons, 3 uncommons, 1 rare, 1 land
+                    if (i < 10)      loadingText.textContent = 'Common';
+                    else if (i < 13) loadingText.textContent = 'Uncommon';
+                    else if (i < 14) loadingText.textContent = 'Rare';
+                    else             loadingText.textContent = 'Land';
+                }
+
+                cardSlot.appendChild(loadingText);
+                grid.appendChild(cardSlot);
+            }
+        }
+
+        async function generatePackProgressive(setCode, generation) {
+            updateProgress('Starting pack generation...');
+            
+            const usedCardIds = new Set(); // Track used cards to prevent duplicates
+            const commonCount = generation.isPremium ? 9 : 10;
+
+            // Generate commons
+            for (let i = 0; i < commonCount; i++) {
+                if (generation.cancelled) return;
+                
+                updateProgress(`Fetching common ${i + 1}/${commonCount}...`);
+                try {
+                    const card = await fetchSingleCard(setCode, 'common', usedCardIds);
+                    if (!generation.cancelled && card) {
+                        displayCard(card, i);
+                        usedCardIds.add(card.id);
+                        generation.cardCount++;
+                    }
+                } catch (error) {
+                    console.error(`Failed to fetch common ${i + 1}:`, error);
+                }
+            }
+
+            // Generate uncommons (3 cards)
+            for (let i = 0; i < 3; i++) {
+                if (generation.cancelled) return;
+                
+                updateProgress(`Fetching uncommon ${i + 1}/3...`);
+                try {
+                    const card = await fetchSingleCard(setCode, 'uncommon', usedCardIds);
+                    if (!generation.cancelled && card) {
+                        displayCard(card, commonCount + i);
+                        usedCardIds.add(card.id);
+                        generation.cardCount++;
+                    }
+                } catch (error) {
+                    console.error(`Failed to fetch uncommon ${i + 1}:`, error);
+                }
+            }
+
+            // Generate rare/mythic (1 card)
+            if (!generation.cancelled) {
+                updateProgress('Fetching rare/mythic card...');
+                try {
+                    const card = await fetchSingleCard(setCode, 'rare', usedCardIds);
+                    if (!generation.cancelled && card) {
+                        displayCard(card, commonCount + 3);
+                        usedCardIds.add(card.id);
+                        generation.cardCount++;
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch rare/mythic:', error);
+                }
+            }
+
+            // Generate land (1 card)
+            if (!generation.cancelled) {
+                updateProgress('Fetching common land...');
+                try {
+                    const card = await fetchSingleCard(setCode, 'land', usedCardIds);
+                    if (!generation.cancelled && card) {
+                        displayCard(card, commonCount + 4);
+                        usedCardIds.add(card.id);
+                        generation.cardCount++;
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch land:', error);
+                }
+            }
+
+            // Generate premium slot (always slot 14, always last)
+            if (generation.isPremium && !generation.cancelled) {
+                updateProgress('Fetching premium card...');
+                try {
+                    const card = await fetchSingleCard(setCode, 'any', usedCardIds);
+                    if (!generation.cancelled && card) {
+                        displayCard(card, 14, true); // isFoil = true
+                        usedCardIds.add(card.id);
+                        generation.cardCount++;
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch premium card:', error);
+                }
+            }
+
+            if (!generation.cancelled) {
+                updateProgress(`Pack complete! ${generation.cardCount}/${packSize} cards loaded.`);
+                setTimeout(() => {
+                    document.getElementById('progress').style.display = 'none';
+                }, 2000);
+            }
+        }
+
+        async function fetchSingleCard(setCode, rarity, usedCardIds = new Set()) {
+            let attempts = 0;
+            const maxAttempts = 20; // Prevent infinite loops
+            
+            while (attempts < maxAttempts) {
+                attempts++;
+                
+                const response = await fetch('/api/booster/single', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        set_code: setCode,
+                        rarity: rarity,
+                        exclude_ids: Array.from(usedCardIds)
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                const card = data.card;
+                
+                // If it's a common slot and we got a land, re-roll
+                if (rarity === "common" && card.is_common_land) {
+                    console.log(`Re-rolling common land: ${card.name} (attempt ${attempts})`);
+                    usedCardIds.add(card.id); // Exclude this basic from future attempts
+                    continue; // Try again
+                }
+                
+                // Good card, return it
+                return card;
+            }
+            
+            // If we've exhausted attempts, throw an error
+            throw new Error(`Failed to get non-basic ${rarity} card after ${maxAttempts} attempts`);
+        }
+
+        function displayCard(card, slotIndex, isFoil = false) {
+            const cardSlot = document.getElementById(`card-slot-${slotIndex}`);
+            if (!cardSlot) return;
+
+            // Clear loading state
+            cardSlot.innerHTML = '';
+            cardSlot.className = 'card-slot' + (isFoil ? ' foil' : '');
+            
+            const img = document.createElement('img');
+            img.src = card.image_url;
+            img.alt = card.name;
+            img.title = `${card.name} - ${card.rarity}${isFoil ? ' ✨' : ''}`;
+            
+            const rarityBadge = document.createElement('div');
+            const displayRarity = card.type_line && card.type_line.includes('Land') ? 'land' : card.rarity;
+            rarityBadge.className = `card-rarity rarity-${displayRarity}`;
+            rarityBadge.textContent = isFoil ? '✨' : (displayRarity === 'land' ? 'L' : card.rarity[0].toUpperCase());
+            
+            cardSlot.appendChild(img);
+            cardSlot.appendChild(rarityBadge);
+
+            // Add loaded class with slight delay for animation
+            img.onload = () => {
+                img.classList.add('loaded');
+                cardSlot.classList.add('loaded');
+                
+                // Remove the loaded highlight after a moment
+                setTimeout(() => {
+                    cardSlot.classList.remove('loaded');
+                }, 1000);
+            };
+        }
+
+        function updateProgress(message) {
+            // const progressDiv = document.getElementById('progress');
+            // progressDiv.textContent = message;
+            // progressDiv.style.display = 'block';
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+            document.getElementById('generateBtn').disabled = show;
+            document.getElementById('randomBtn').disabled = show;
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('error').style.display = 'none';
+        }
+
+        // Load sets when page loads
+        loadSets();
+    </script>
+</body>
+</html>

@@ -1,4 +1,6 @@
 .DS_Store
+pico/sd
+webserver/cache
 
 # Python virtual environment
 webserver/.venv/
