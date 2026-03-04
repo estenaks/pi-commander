@@ -122,6 +122,33 @@
             from { transform: scaleX(0); }
             to   { transform: scaleX(1); }
         }
+        .card-slot .send-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.75);
+            display: none;
+            justify-content: center;
+            gap: 6px;
+            padding: 6px;
+            z-index: 10;
+        }
+        .card-slot.revealed .send-overlay {
+            display: flex;
+        }
+        .send-overlay button {
+            background: #4CAF50;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .send-overlay button:hover {
+            background: #45a049;
+        }
         .card-rarity {
             position: absolute;
             top: 5px;
@@ -198,12 +225,14 @@
     </div>
 
     <script>
+        let allSets = [];
+        let currentGeneration = null;
         let packSize = 15;
 
         function flipAll() {
             for (let i = 0; i < packSize; i++) {
                 const slot = document.getElementById(`card-slot-${i}`);
-                if (slot) slot.click();
+                if (slot && slot.dataset.faceIndex === '-1') slot.click();
             }
         }
 
@@ -461,13 +490,6 @@
                     document.getElementById('progress').style.display = 'none';
                 }, 2000);
             }
-
-            if (!generation.cancelled) {
-                updateProgress(`Pack complete! ${generation.cardCount}/${packSize} cards loaded.`);
-                setTimeout(() => {
-                    document.getElementById('progress').style.display = 'none';
-                }, 2000);
-            }
         }
 
         async function fetchSingleCard(setCode, rarity, usedCardIds = new Set()) {
@@ -539,11 +561,41 @@
             rarityBadge.textContent = isFoil ? '✨' : (displayRarity === 'land' ? 'L' : card.rarity[0].toUpperCase());
             rarityBadge.style.display = 'none';
 
+            const sendOverlay = document.createElement('div');
+            sendOverlay.className = 'send-overlay';
+            [1, 2, 3, 4].forEach(p => {
+                const btn = document.createElement('button');
+                btn.textContent = `P${p}`;
+                btn.title = `Send to Player ${p}`;
+                btn.addEventListener('click', async (e) => {
+                    e.stopPropagation(); // don't trigger card flip
+                    btn.disabled = true;
+                    btn.textContent = '...';
+                    try {
+                        const r = await fetch(`/api/search/${p}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ q: card.name })
+                        });
+                        btn.textContent = r.ok ? '✓' : '✗';
+                    } catch {
+                        btn.textContent = '✗';
+                    }
+                    setTimeout(() => {
+                        btn.textContent = `P${p}`;
+                        btn.disabled = false;
+                    }, 1500);
+                });
+                sendOverlay.appendChild(btn);
+            });
+
             cardSlot.appendChild(img);
             cardSlot.appendChild(rarityBadge);
+            cardSlot.appendChild(sendOverlay);
 
             // -1 = face-down (cardback), 0 = front, 1 = back
             let faceIndex = -1;
+            cardSlot.dataset.faceIndex = '-1';
 
             img.onload = () => {
                 img.classList.add('loaded');
@@ -582,6 +634,7 @@
                         }
 
                         faceIndex = nextIndex;
+                        cardSlot.dataset.faceIndex = String(nextIndex);
                         img.classList.add('flipping-in');
                         img.addEventListener('animationend', () => {
                             img.classList.remove('flipping-in');
@@ -595,14 +648,14 @@
                 if (img.classList.contains('flipping-out') || img.classList.contains('flipping-in')) return;
 
                 if (faceIndex === -1) {
-                    // face-down → reveal front
+                    // Initial reveal — always show front first
                     flipTo(0);
-                } else if (faceIndex === 0 && isDFC) {
-                    // front → back (DFC only)
-                    flipTo(1);
+                } else if (isDFC) {
+                    // DFC: toggle between front and back, never return to cardback
+                    flipTo(faceIndex === 0 ? 1 : 0);
                 } else {
-                    // front (single) or back (DFC) → face-down
-                    flipTo(-1);
+                    // Single-faced: front ↔ cardback
+                    flipTo(faceIndex === 0 ? -1 : 0);
                 }
             });
         }

@@ -33,7 +33,8 @@ EXCLUDED_SET_CODES = {
     # Manually excluded sets (add more as needed)
     "pred",
     "h17",
-    "phtr"
+    "phtr",
+    "punk"
     # Commander sets are excluded by name filter below
 }
 
