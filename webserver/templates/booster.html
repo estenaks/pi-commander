@@ -467,22 +467,26 @@
 
         async function fetchSingleCard(setCode, rarity, usedCardIds = new Set()) {
             let attempts = 0;
-            const maxAttempts = 20; // Prevent infinite loops
+            const maxAttempts = 20;
             
             while (attempts < maxAttempts) {
                 attempts++;
                 
                 const response = await fetch('/api/booster/single', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         set_code: setCode,
                         rarity: rarity,
                         exclude_ids: Array.from(usedCardIds)
                     })
                 });
+
+                // 404 means none of this type exist in the set — no point retrying
+                if (response.status === 404) {
+                    const data = await response.json();
+                    throw new Error(data.error || `No ${rarity} cards available`);
+                }
 
                 const data = await response.json();
                 
@@ -495,15 +499,13 @@
                 // If it's a common slot and we got a land, re-roll
                 if (rarity === "common" && card.is_common_land) {
                     console.log(`Re-rolling common land: ${card.name} (attempt ${attempts})`);
-                    usedCardIds.add(card.id); // Exclude this basic from future attempts
-                    continue; // Try again
+                    usedCardIds.add(card.id);
+                    continue;
                 }
                 
-                // Good card, return it
                 return card;
             }
             
-            // If we've exhausted attempts, throw an error
             throw new Error(`Failed to get non-basic ${rarity} card after ${maxAttempts} attempts`);
         }
 
