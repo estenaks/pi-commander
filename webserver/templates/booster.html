@@ -161,6 +161,7 @@
     <script>
         let allSets = [];
         let currentGeneration = null;
+        let packSize = 14;
 
         // Load sets on page load
         async function loadSets() {
@@ -218,7 +219,7 @@
             
             // Add set icon if available - the icon_svg_uri is directly on the set object
             if (set.icon_svg_uri) {
-                infoHtml = `<img src="${set.icon_svg_uri}" alt="${set.name} icon" style="width: 20px; height: 20px; margin-right: 8px; vertical-align: middle; filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.5));">` + infoHtml;
+                infoHtml = `<img src="${set.icon_svg_uri}" alt="${set.name} icon" style="width: 20px; height: 20px; margin-right: 8px; vertical-align: middle; filter: drop-shadow(0px 0px 0px rgba(0,0,0,0.5));">` + infoHtml;
             }
             
             setInfoDiv.innerHTML = infoHtml;
@@ -276,8 +277,8 @@
             const grid = document.getElementById('packGrid');
             grid.innerHTML = '';
 
-            // Create 13 empty card slots (9 common + 3 uncommon + 1 rare/mythic)
-            for (let i = 0; i < 13; i++) {
+            // Create packSize empty card slots (9 common + 3 uncommon + 1 rare/mythic)
+            for (let i = 0; i < packSize; i++) {
                 const cardSlot = document.createElement('div');
                 cardSlot.className = 'card-slot loading';
                 cardSlot.id = `card-slot-${i}`;
@@ -288,8 +289,10 @@
                     loadingText.textContent = 'Common';
                 } else if (i < 12) {
                     loadingText.textContent = 'Uncommon';
-                } else {
+                } else if (i < 13) {
                     loadingText.textContent = 'Rare';
+                } else {
+                    loadingText.textContent = 'Land';
                 }
                 cardSlot.appendChild(loadingText);
                 
@@ -353,7 +356,7 @@
 
             // Generate land (1 card)
             if (!generation.cancelled) {
-                updateProgress('Fetching basic land...');
+                updateProgress('Fetching common land...');
                 try {
                     const card = await fetchSingleCard(setCode, 'land', usedCardIds);
                     if (!generation.cancelled && card) {
@@ -367,14 +370,7 @@
             }
 
             if (!generation.cancelled) {
-                updateProgress(`Pack complete! ${generation.cardCount}/14 cards loaded.`);
-                setTimeout(() => {
-                    document.getElementById('progress').style.display = 'none';
-                }, 2000);
-            }
-
-            if (!generation.cancelled) {
-                updateProgress(`Pack complete! ${generation.cardCount}/13 cards loaded.`);
+                updateProgress(`Pack complete! ${generation.cardCount}/${packSize} cards loaded.`);
                 setTimeout(() => {
                     document.getElementById('progress').style.display = 'none';
                 }, 2000);
