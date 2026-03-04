@@ -108,6 +108,20 @@
         .card-slot img.loaded {
             opacity: 1;
         }
+        .card-slot img.flipping-out {
+            animation: flipOut 0.15s ease-in forwards;
+        }
+        .card-slot img.flipping-in {
+            animation: flipIn 0.15s ease-out forwards;
+        }
+        @keyframes flipOut {
+            from { transform: scaleX(1); }
+            to   { transform: scaleX(0); }
+        }
+        @keyframes flipIn {
+            from { transform: scaleX(0); }
+            to   { transform: scaleX(1); }
+        }
         .card-rarity {
             position: absolute;
             top: 5px;
@@ -168,6 +182,7 @@
                 </select>
                 <button id="generateBtn" disabled onclick="generatePack()">Generate Pack</button>
                 <button id="randomBtn" class="random-btn" onclick="generateRandomPack()">Random Set Pack</button>
+                <button id="flipAllBtn" style="display: none;" onclick="flipAll()">Flip All</button>
             </div>
             <div id="setInfo" style="margin-top: 10px; font-size: 14px; color: #ccc;"></div>
             <div id="progress" class="progress" style="display: none;"></div>
@@ -186,6 +201,16 @@
         let allSets = [];
         let currentGeneration = null;
         let packSize = 15;
+        let packFaceUp = false;
+
+        function flipAll() {
+            for (let i = 0; i < packSize; i++) {
+                const slot = document.getElementById(`card-slot-${i}`);
+                if (slot) slot.click();
+            }
+            packFaceUp = !packFaceUp;
+            document.getElementById('flipAllBtn').textContent = packFaceUp ? 'Flip All Back' : 'Flip All';
+        }
 
         const PREMIUM_CHANCE = 0.50; // 50% chance of premium foil slot replacing 10th common
 
@@ -245,9 +270,8 @@
 
         function updateSetInfo(set) {
             const setInfoDiv = document.getElementById('setInfo');
-            let infoHtml = `${set.card_count} cards • Released: ${set.released_at}`;
+            let infoHtml = `<span style="font-family: monospace; background: #3a3a3a; padding: 2px 6px; border-radius: 3px; margin-right: 8px;">${set.code}</span>${set.card_count} cards • Released: ${set.released_at}`;
             
-            // Add set icon if available - the icon_svg_uri is directly on the set object
             if (set.icon_svg_uri) {
                 infoHtml = `<img src="${set.icon_svg_uri}" alt="${set.name} icon" style="width: 20px; height: 20px; margin-right: 8px; vertical-align: middle; filter: drop-shadow(0px 0px 0px rgba(0,0,0,0.5));">` + infoHtml;
             }
@@ -305,6 +329,9 @@
         }
 
         function setupPackGrid(isPremium) {
+            packFaceUp = false;
+            document.getElementById('flipAllBtn').style.display = 'none';
+            document.getElementById('flipAllBtn').textContent = 'Flip All';
             const grid = document.getElementById('packGrid');
             grid.innerHTML = '';
 
@@ -424,6 +451,14 @@
 
             if (!generation.cancelled) {
                 updateProgress(`Pack complete! ${generation.cardCount}/${packSize} cards loaded.`);
+                document.getElementById('flipAllBtn').style.display = '';
+                setTimeout(() => {
+                    document.getElementById('progress').style.display = 'none';
+                }, 2000);
+            }
+
+            if (!generation.cancelled) {
+                updateProgress(`Pack complete! ${generation.cardCount}/${packSize} cards loaded.`);
                 setTimeout(() => {
                     document.getElementById('progress').style.display = 'none';
                 }, 2000);
@@ -476,33 +511,70 @@
             const cardSlot = document.getElementById(`card-slot-${slotIndex}`);
             if (!cardSlot) return;
 
-            // Clear loading state
             cardSlot.innerHTML = '';
-            cardSlot.className = 'card-slot' + (isFoil ? ' foil' : '');
-            
+            cardSlot.className = 'card-slot';
+
             const img = document.createElement('img');
-            img.src = card.image_url;
-            img.alt = card.name;
-            img.title = `${card.name} - ${card.rarity}${isFoil ? ' ✨' : ''}`;
-            
+            img.src = '/cardback.jpg';
+            img.alt = 'Card back';
+            img.title = 'Click to reveal';
+
             const rarityBadge = document.createElement('div');
             const displayRarity = card.type_line && card.type_line.includes('Land') ? 'land' : card.rarity;
             rarityBadge.className = `card-rarity rarity-${displayRarity}`;
             rarityBadge.textContent = isFoil ? '✨' : (displayRarity === 'land' ? 'L' : card.rarity[0].toUpperCase());
-            
+            rarityBadge.style.display = 'none'; // hidden until revealed
+
             cardSlot.appendChild(img);
             cardSlot.appendChild(rarityBadge);
 
-            // Add loaded class with slight delay for animation
+            let isFaceUp = false;
+
             img.onload = () => {
                 img.classList.add('loaded');
-                cardSlot.classList.add('loaded');
-                
-                // Remove the loaded highlight after a moment
-                setTimeout(() => {
-                    cardSlot.classList.remove('loaded');
-                }, 1000);
             };
+
+            cardSlot.addEventListener('click', () => {
+                if (img.classList.contains('flipping-out') || img.classList.contains('flipping-in')) return;
+
+                if (!isFaceUp) {
+                    // Preload the front image before animating
+                    const preload = new Image();
+                    preload.onload = () => {
+                        img.classList.add('flipping-out');
+                        img.addEventListener('animationend', () => {
+                            img.classList.remove('flipping-out');
+                            img.src = card.image_url;
+                            img.alt = card.name;
+                            img.title = `${card.name} - ${card.rarity}${isFoil ? ' ✨' : ''}`;
+                            rarityBadge.style.display = '';
+                            if (isFoil) cardSlot.classList.add('foil');
+                            isFaceUp = true;
+                            img.classList.add('flipping-in');
+                            img.addEventListener('animationend', () => {
+                                img.classList.remove('flipping-in');
+                            }, { once: true });
+                        }, { once: true });
+                    };
+                    preload.src = card.image_url;
+                } else {
+                    // Card back is already cached, no preload needed
+                    img.classList.add('flipping-out');
+                    img.addEventListener('animationend', () => {
+                        img.classList.remove('flipping-out');
+                        img.src = '/cardback.jpg';
+                        img.alt = 'Card back';
+                        img.title = 'Click to reveal';
+                        rarityBadge.style.display = 'none';
+                        cardSlot.classList.remove('foil');
+                        isFaceUp = false;
+                        img.classList.add('flipping-in');
+                        img.addEventListener('animationend', () => {
+                            img.classList.remove('flipping-in');
+                        }, { once: true });
+                    }, { once: true });
+                }
+            });
         }
 
         function updateProgress(message) {
