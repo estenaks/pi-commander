@@ -130,6 +130,30 @@
             font-size: 12px;
             color: #ccc;
         }
+        /* Foil overlay for premium slot */
+        .card-slot.foil::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 10px;
+            background: linear-gradient(
+                135deg,
+                rgba(255,0,0,0.10) 0%,
+                rgba(255,165,0,0.10) 20%,
+                rgba(255,255,0,0.10) 40%,
+                rgba(0,255,0,0.10) 60%,
+                rgba(0,0,255,0.10) 80%,
+                rgba(148,0,211,0.10) 100%
+            );
+            background-size: 200% 200%;
+            pointer-events: none;
+            animation: foilShimmer 4s linear infinite;
+        }
+        @keyframes foilShimmer {
+            0%   { opacity: 0.6; background-position: 0% 50%; }
+            50%  { opacity: 1.0; background-position: 100% 50%; }
+            100% { opacity: 0.6; background-position: 0% 50%; }
+        }
     </style>
 </head>
 <body>
@@ -161,7 +185,13 @@
     <script>
         let allSets = [];
         let currentGeneration = null;
-        let packSize = 14;
+        let packSize = 15;
+
+        const PREMIUM_CHANCE = 0.50; // 50% chance of premium foil slot replacing 10th common
+
+        function rollPremium() {
+            return Math.random() < PREMIUM_CHANCE ? 'premium' : 'common';
+        }
 
         // Load sets on page load
         async function loadSets() {
@@ -251,12 +281,13 @@
                 currentGeneration.cancelled = true;
             }
 
-            // Start new generation
-            currentGeneration = { cancelled: false, cardCount: 0 };
-            
+            // Roll for premium before anything starts
+            const isPremium = rollPremium() === 'premium';
+            currentGeneration = { cancelled: false, cardCount: 0, isPremium };
+
             showLoading(true);
             hideError();
-            setupPackGrid();
+            setupPackGrid(isPremium);
             
             try {
                 // Start the progressive generation
@@ -273,11 +304,11 @@
             }
         }
 
-        function setupPackGrid() {
+        function setupPackGrid(isPremium) {
             const grid = document.getElementById('packGrid');
             grid.innerHTML = '';
 
-            // Create packSize empty card slots (9 common + 3 uncommon + 1 rare/mythic)
+            // 15 slots total: commons fill slots 0–8 (or 0–9), then uncommons, rare, land, [premium]
             for (let i = 0; i < packSize; i++) {
                 const cardSlot = document.createElement('div');
                 cardSlot.className = 'card-slot loading';
@@ -285,17 +316,23 @@
                 
                 const loadingText = document.createElement('div');
                 loadingText.className = 'loading-text';
-                if (i < 9) {
-                    loadingText.textContent = 'Common';
-                } else if (i < 12) {
-                    loadingText.textContent = 'Uncommon';
-                } else if (i < 13) {
-                    loadingText.textContent = 'Rare';
+
+                if (isPremium) {
+                    // 9 commons, 3 uncommons, 1 rare, 1 land, 1 premium
+                    if (i < 9)       loadingText.textContent = 'Common';
+                    else if (i < 12) loadingText.textContent = 'Uncommon';
+                    else if (i < 13) loadingText.textContent = 'Rare';
+                    else if (i < 14) loadingText.textContent = 'Land';
+                    else             loadingText.textContent = '✨';
                 } else {
-                    loadingText.textContent = 'Land';
+                    // 10 commons, 3 uncommons, 1 rare, 1 land
+                    if (i < 10)      loadingText.textContent = 'Common';
+                    else if (i < 13) loadingText.textContent = 'Uncommon';
+                    else if (i < 14) loadingText.textContent = 'Rare';
+                    else             loadingText.textContent = 'Land';
                 }
+
                 cardSlot.appendChild(loadingText);
-                
                 grid.appendChild(cardSlot);
             }
         }
@@ -304,17 +341,18 @@
             updateProgress('Starting pack generation...');
             
             const usedCardIds = new Set(); // Track used cards to prevent duplicates
-            
-            // Generate commons (9 cards)
-            for (let i = 0; i < 9; i++) {
+            const commonCount = generation.isPremium ? 9 : 10;
+
+            // Generate commons
+            for (let i = 0; i < commonCount; i++) {
                 if (generation.cancelled) return;
                 
-                updateProgress(`Fetching common ${i + 1}/9...`);
+                updateProgress(`Fetching common ${i + 1}/${commonCount}...`);
                 try {
                     const card = await fetchSingleCard(setCode, 'common', usedCardIds);
                     if (!generation.cancelled && card) {
                         displayCard(card, i);
-                        usedCardIds.add(card.id); // Track this card
+                        usedCardIds.add(card.id);
                         generation.cardCount++;
                     }
                 } catch (error) {
@@ -330,8 +368,8 @@
                 try {
                     const card = await fetchSingleCard(setCode, 'uncommon', usedCardIds);
                     if (!generation.cancelled && card) {
-                        displayCard(card, 9 + i);
-                        usedCardIds.add(card.id); // Track this card
+                        displayCard(card, commonCount + i);
+                        usedCardIds.add(card.id);
                         generation.cardCount++;
                     }
                 } catch (error) {
@@ -345,7 +383,7 @@
                 try {
                     const card = await fetchSingleCard(setCode, 'rare', usedCardIds);
                     if (!generation.cancelled && card) {
-                        displayCard(card, 12); // Slot 12 for the rare/mythic
+                        displayCard(card, commonCount + 3);
                         usedCardIds.add(card.id);
                         generation.cardCount++;
                     }
@@ -360,12 +398,27 @@
                 try {
                     const card = await fetchSingleCard(setCode, 'land', usedCardIds);
                     if (!generation.cancelled && card) {
-                        displayCard(card, 13); // Slot 13 for the land
+                        displayCard(card, commonCount + 4);
                         usedCardIds.add(card.id);
                         generation.cardCount++;
                     }
                 } catch (error) {
                     console.error('Failed to fetch land:', error);
+                }
+            }
+
+            // Generate premium slot (always slot 14, always last)
+            if (generation.isPremium && !generation.cancelled) {
+                updateProgress('Fetching premium card...');
+                try {
+                    const card = await fetchSingleCard(setCode, 'any', usedCardIds);
+                    if (!generation.cancelled && card) {
+                        displayCard(card, 14, true); // isFoil = true
+                        usedCardIds.add(card.id);
+                        generation.cardCount++;
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch premium card:', error);
                 }
             }
 
@@ -419,23 +472,23 @@
             throw new Error(`Failed to get non-basic ${rarity} card after ${maxAttempts} attempts`);
         }
 
-        function displayCard(card, slotIndex) {
+        function displayCard(card, slotIndex, isFoil = false) {
             const cardSlot = document.getElementById(`card-slot-${slotIndex}`);
             if (!cardSlot) return;
 
             // Clear loading state
             cardSlot.innerHTML = '';
-            cardSlot.className = 'card-slot';
+            cardSlot.className = 'card-slot' + (isFoil ? ' foil' : '');
             
             const img = document.createElement('img');
             img.src = card.image_url;
             img.alt = card.name;
-            img.title = `${card.name} - ${card.rarity}`;
+            img.title = `${card.name} - ${card.rarity}${isFoil ? ' ✨' : ''}`;
             
             const rarityBadge = document.createElement('div');
             const displayRarity = card.type_line && card.type_line.includes('Land') ? 'land' : card.rarity;
             rarityBadge.className = `card-rarity rarity-${displayRarity}`;
-            rarityBadge.textContent = displayRarity === 'land' ? 'L' : card.rarity[0].toUpperCase();
+            rarityBadge.textContent = isFoil ? '✨' : (displayRarity === 'land' ? 'L' : card.rarity[0].toUpperCase());
             
             cardSlot.appendChild(img);
             cardSlot.appendChild(rarityBadge);

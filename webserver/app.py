@@ -751,6 +751,22 @@ def api_booster_single_card():
                 "from_cache": True,
                 "fetch_time": round(fetch_time, 3)
             })
+
+        # Handle "any" rarity for premium slot — no rarity restriction
+        if rarity == "any":
+            available = [card for card in set_cards if card["id"] not in exclude_ids]
+            if not available:
+                return jsonify({"error": f"No available cards for set {set_code}"}), 404
+
+            card = random.choice(available)
+            fetch_time = time.time() - start_time
+            print(f"[booster] Selected premium card in {fetch_time:.3f}s: {card['name']} ({card['rarity']})")
+
+            return jsonify({
+                "card": card,
+                "from_cache": True,
+                "fetch_time": round(fetch_time, 3)
+            })
         
         # Handle common/uncommon
         rarity_pool = _get_cards_by_rarity_from_set(set_cards, rarity)
