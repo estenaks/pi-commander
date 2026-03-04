@@ -64,6 +64,11 @@
             border-radius: 4px;
             margin: 10px 0;
         }
+        .progress {
+            margin: 10px 0;
+            font-size: 14px;
+            color: #ccc;
+        }
         .pack-grid {
             display: grid;
             grid-template-columns: repeat(5, 1fr);
@@ -77,11 +82,31 @@
             overflow: hidden;
             background: #2a2a2a;
             position: relative;
+            transition: all 0.3s ease;
+        }
+        .card-slot.loading {
+            background: linear-gradient(45deg, #2a2a2a, #3a3a3a, #2a2a2a);
+            background-size: 200% 200%;
+            animation: shimmer 1.5s infinite;
+        }
+        .card-slot.loaded {
+            border-color: #4CAF50;
+            transform: scale(1.02);
+        }
+        @keyframes shimmer {
+            0% { background-position: 0% 0%; }
+            50% { background-position: 100% 100%; }
+            100% { background-position: 0% 0%; }
         }
         .card-slot img {
             width: 100%;
             height: 100%;
             object-fit: cover;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        .card-slot img.loaded {
+            opacity: 1;
         }
         .card-rarity {
             position: absolute;
@@ -96,6 +121,14 @@
         .rarity-uncommon { background: #c0c0c0; color: #000; }
         .rarity-rare { background: #ffb366; color: #000; }
         .rarity-mythic { background: #ff6b35; color: #fff; }
+        .loading-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 12px;
+            color: #ccc;
+        }
     </style>
 </head>
 <body>
@@ -112,10 +145,11 @@
                 <button id="randomBtn" class="random-btn" onclick="generateRandomPack()">Random Set Pack</button>
             </div>
             <div id="setInfo" style="margin-top: 10px; font-size: 14px; color: #ccc;"></div>
+            <div id="progress" class="progress" style="display: none;"></div>
         </div>
 
         <div id="loading" class="loading" style="display: none;">
-            Generating your booster pack...
+            Preparing your booster pack...
         </div>
 
         <div id="error" class="error" style="display: none;"></div>
@@ -125,17 +159,7 @@
 
     <script>
         let allSets = [];
-        let currentDelay = 0;
-
-        // Rate limiting helper
-        function addDelay() {
-            currentDelay += 75; // 75ms between requests
-            return currentDelay;
-        }
-
-        function resetDelay() {
-            currentDelay = 0;
-        }
+        let currentGeneration = null;
 
         // Load sets on page load
         async function loadSets() {
@@ -204,54 +228,152 @@
         }
 
         async function generatePackForSet(setCode) {
+            // Cancel any ongoing generation
+            if (currentGeneration) {
+                currentGeneration.cancelled = true;
+            }
+
+            // Start new generation
+            currentGeneration = { cancelled: false, cardCount: 0 };
+            
             showLoading(true);
             hideError();
-            resetDelay();
-
+            setupPackGrid();
+            
             try {
-                const response = await fetch('/api/booster/generate', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ set_code: setCode })
-                });
-
-                const data = await response.json();
-                
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-
-                displayPack(data.cards);
+                // Start the progressive generation
+                await generatePackProgressive(setCode, currentGeneration);
             } catch (error) {
-                showError('Failed to generate pack: ' + error.message);
+                if (!currentGeneration.cancelled) {
+                    showError('Failed to generate pack: ' + error.message);
+                }
             } finally {
                 showLoading(false);
+                if (!currentGeneration.cancelled) {
+                    currentGeneration = null;
+                }
             }
         }
 
-        function displayPack(cards) {
+        function setupPackGrid() {
             const grid = document.getElementById('packGrid');
             grid.innerHTML = '';
 
-            cards.forEach((card, index) => {
+            // Create 12 empty card slots
+            for (let i = 0; i < 12; i++) {
                 const cardSlot = document.createElement('div');
-                cardSlot.className = 'card-slot';
+                cardSlot.className = 'card-slot loading';
+                cardSlot.id = `card-slot-${i}`;
                 
-                const img = document.createElement('img');
-                img.src = card.image_url;
-                img.alt = card.name;
-                img.title = `${card.name} - ${card.rarity}`;
+                const loadingText = document.createElement('div');
+                loadingText.className = 'loading-text';
+                loadingText.textContent = i < 9 ? 'Common' : 'Uncommon';
+                cardSlot.appendChild(loadingText);
                 
-                const rarityBadge = document.createElement('div');
-                rarityBadge.className = `card-rarity rarity-${card.rarity}`;
-                rarityBadge.textContent = card.rarity[0].toUpperCase();
-                
-                cardSlot.appendChild(img);
-                cardSlot.appendChild(rarityBadge);
                 grid.appendChild(cardSlot);
+            }
+        }
+
+        async function generatePackProgressive(setCode, generation) {
+            updateProgress('Starting pack generation...');
+            
+            // Generate commons (9 cards)
+            for (let i = 0; i < 9; i++) {
+                if (generation.cancelled) return;
+                
+                updateProgress(`Fetching common ${i + 1}/9...`);
+                try {
+                    const card = await fetchSingleCard(setCode, 'common');
+                    if (!generation.cancelled && card) {
+                        displayCard(card, i);
+                        generation.cardCount++;
+                    }
+                } catch (error) {
+                    console.error(`Failed to fetch common ${i + 1}:`, error);
+                }
+            }
+
+            // Generate uncommons (3 cards)
+            for (let i = 0; i < 3; i++) {
+                if (generation.cancelled) return;
+                
+                updateProgress(`Fetching uncommon ${i + 1}/3...`);
+                try {
+                    const card = await fetchSingleCard(setCode, 'uncommon');
+                    if (!generation.cancelled && card) {
+                        displayCard(card, 9 + i);
+                        generation.cardCount++;
+                    }
+                } catch (error) {
+                    console.error(`Failed to fetch uncommon ${i + 1}:`, error);
+                }
+            }
+
+            if (!generation.cancelled) {
+                updateProgress(`Pack complete! ${generation.cardCount}/12 cards loaded.`);
+                setTimeout(() => {
+                    document.getElementById('progress').style.display = 'none';
+                }, 2000);
+            }
+        }
+
+        async function fetchSingleCard(setCode, rarity) {
+            const response = await fetch('/api/booster/single', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    set_code: setCode,
+                    rarity: rarity 
+                })
             });
+
+            const data = await response.json();
+            
+            if (data.error) {
+                throw new Error(data.error);
+            }
+
+            return data.card;
+        }
+
+        function displayCard(card, slotIndex) {
+            const cardSlot = document.getElementById(`card-slot-${slotIndex}`);
+            if (!cardSlot) return;
+
+            // Clear loading state
+            cardSlot.innerHTML = '';
+            cardSlot.className = 'card-slot';
+            
+            const img = document.createElement('img');
+            img.src = card.image_url;
+            img.alt = card.name;
+            img.title = `${card.name} - ${card.rarity}`;
+            
+            const rarityBadge = document.createElement('div');
+            rarityBadge.className = `card-rarity rarity-${card.rarity}`;
+            rarityBadge.textContent = card.rarity[0].toUpperCase();
+            
+            cardSlot.appendChild(img);
+            cardSlot.appendChild(rarityBadge);
+
+            // Add loaded class with slight delay for animation
+            img.onload = () => {
+                img.classList.add('loaded');
+                cardSlot.classList.add('loaded');
+                
+                // Remove the loaded highlight after a moment
+                setTimeout(() => {
+                    cardSlot.classList.remove('loaded');
+                }, 1000);
+            };
+        }
+
+        function updateProgress(message) {
+            const progressDiv = document.getElementById('progress');
+            progressDiv.textContent = message;
+            progressDiv.style.display = 'block';
         }
 
         function showLoading(show) {

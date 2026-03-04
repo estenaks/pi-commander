@@ -9,6 +9,7 @@ import os
 import sys
 import qrcode
 import time
+import random
 from datetime import datetime, timedelta
 
 from PIL import Image, ImageDraw, ImageFont
@@ -26,7 +27,7 @@ PLAYERS = [1, 2, 3, 4]
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 MAX_CACHE_SIZE_GB = 5
 CACHE_EXPIRY_DAYS = 365
-SCRYFALL_REQUEST_DELAY = 0.075  # 75ms delay between requests
+SCRYFALL_REQUEST_DELAY = 0.050  # 50ms delay between requests
 
 _state_lock = threading.Lock()
 _state_by_player = {
@@ -433,10 +434,59 @@ def _get_all_sets() -> list[dict]:
     ).get("data", [])
 
 
+def _get_cached_cards_for_set(set_code: str, rarity: str, count: int) -> list[dict]:
+    """Try to get cards from cache first, for faster pack generation."""
+    if not os.path.exists(CACHE_DIR):
+        return []
+    
+    cached_cards = []
+    cache_files = [f for f in os.listdir(CACHE_DIR) if f.startswith("card_") and f.endswith(".json")]
+    
+    # Shuffle the cache files to get variety
+    random.shuffle(cache_files)
+    
+    for cache_file in cache_files:
+        if len(cached_cards) >= count:
+            break
+            
+        try:
+            cache_key = cache_file[:-5]  # Remove .json extension
+            cached_card_data = _get_cached_data(cache_key, cache_hours=24 * CACHE_EXPIRY_DAYS)  # Use long cache for cards
+            
+            if cached_card_data and isinstance(cached_card_data, dict):
+                # Check if this card matches our criteria
+                card_set = cached_card_data.get("set", "").lower()
+                card_rarity = cached_card_data.get("rarity", "").lower()
+                
+                if card_set == set_code.lower() and card_rarity == rarity.lower():
+                    # Make sure we don't have this card already
+                    card_id = cached_card_data.get("id")
+                    if not any(c.get("id") == card_id for c in cached_cards):
+                        
+                        image_url = _pick_image_border_crop_only(cached_card_data.get("image_uris", {}))
+                        if image_url:
+                            cached_cards.append({
+                                "id": card_id,
+                                "name": cached_card_data.get("name", "Unknown"),
+                                "image_url": image_url,
+                                "rarity": rarity,
+                                "set": set_code,
+                                "mana_cost": cached_card_data.get("mana_cost", ""),
+                                "type_line": cached_card_data.get("type_line", "")
+                            })
+                            print(f"[booster] Using cached {rarity} card: {cached_card_data.get('name')}")
+                            
+        except Exception as e:
+            print(f"[booster] Error reading cached card {cache_file}: {e}", file=sys.stderr)
+            continue
+    
+    return cached_cards
+
+
 def _get_random_cards_with_filter(set_code: str, rarity: str, count: int) -> list[dict]:
-    """Get random cards from a set with specific rarity."""
+    """Get random cards from a set with specific rarity, using caching for individual cards."""
     cards = []
-    max_attempts = count * 3  # Prevent infinite loops
+    max_attempts = count * 5  # Increased attempts since we might hit cached duplicates
     attempts = 0
     
     while len(cards) < count and attempts < max_attempts:
@@ -447,11 +497,18 @@ def _get_random_cards_with_filter(set_code: str, rarity: str, count: int) -> lis
             query = f"set:{set_code} rarity:{rarity}"
             url = f"https://api.scryfall.com/cards/random?q={urllib.parse.quote(query)}"
             
-            card_data = _scryfall_get(url)
+            # Don't cache the random endpoint itself, but cache individual cards
+            card_data = _scryfall_get(url, use_cache=False)
             
-            # Check if we already have this card
+            # Check if we already have this card in this pack
             card_id = card_data.get("id")
             if not any(c.get("id") == card_id for c in cards):
+                
+                # Cache this individual card data for future use
+                card_cache_key = f"card_{card_id}"
+                with _cache_lock:
+                    _set_cached_data(card_cache_key, card_data)
+                
                 # Extract the image URL and basic info
                 image_url = _pick_image_border_crop_only(card_data.get("image_uris", {}))
                 
@@ -465,12 +522,39 @@ def _get_random_cards_with_filter(set_code: str, rarity: str, count: int) -> lis
                         "mana_cost": card_data.get("mana_cost", ""),
                         "type_line": card_data.get("type_line", "")
                     })
+                    print(f"[booster] Fetched and cached {rarity} card: {card_data.get('name')}")
                     
         except Exception as e:
             print(f"[booster] Error fetching random {rarity} card: {e}", file=sys.stderr)
             # Continue trying, but don't fail the whole pack
             
     return cards
+
+
+def _get_cards_for_pack(set_code: str, rarity: str, count: int) -> list[dict]:
+    """Get cards for booster pack, using cache first, then fetching new ones."""
+    # First, try to get cards from cache
+    cached_cards = _get_cached_cards_for_set(set_code, rarity, count)
+    
+    # If we have enough cached cards, use them
+    if len(cached_cards) >= count:
+        random.shuffle(cached_cards)
+        print(f"[booster] Using {count} cached {rarity} cards for {set_code}")
+        return cached_cards[:count]
+    
+    # If we need more cards, fetch them (this will also cache them)
+    needed = count - len(cached_cards)
+    print(f"[booster] Need to fetch {needed} more {rarity} cards for {set_code} (have {len(cached_cards)} cached)")
+    
+    new_cards = _get_random_cards_with_filter(set_code, rarity, needed)
+    
+    # Combine cached and new cards
+    all_cards = cached_cards + new_cards
+    
+    # Shuffle for variety
+    random.shuffle(all_cards)
+    
+    return all_cards[:count]
 
 
 # ---- Routes ----
@@ -551,7 +635,7 @@ def api_booster_sets():
 
 @app.post("/api/booster/generate")
 def api_booster_generate():
-    """Generate a booster pack for a specific set."""
+    """Generate a complete booster pack (legacy endpoint - consider using /api/booster/single for progressive loading)."""
     try:
         payload = request.get_json(silent=True) or {}
         set_code = payload.get("set_code", "").strip().lower()
@@ -559,22 +643,25 @@ def api_booster_generate():
         if not set_code:
             return jsonify({"error": "Missing set_code parameter"}), 400
         
-        print(f"[booster] Generating pack for set: {set_code}")
+        print(f"[booster] Generating complete pack for set: {set_code}")
+        start_time = time.time()
         
         # Generate the booster pack: 9 commons, 3 uncommons
-        commons = _get_random_cards_with_filter(set_code, "common", 9)
-        uncommons = _get_random_cards_with_filter(set_code, "uncommon", 3)
+        commons = _get_cards_for_pack(set_code, "common", 9)
+        uncommons = _get_cards_for_pack(set_code, "uncommon", 3)
         
-        # Combine and ensure we have 12 cards
+        # Combine and shuffle
         all_cards = commons + uncommons
+        random.shuffle(all_cards)
+        
+        generation_time = time.time() - start_time
         
         if len(all_cards) < 12:
             print(f"[booster] Warning: Only got {len(all_cards)}/12 cards for {set_code}")
-            # If we don't have enough cards, it might be a set with limited card availability
             if len(all_cards) == 0:
                 return jsonify({"error": f"No cards found for set {set_code}. Try a different set."}), 404
         
-        print(f"[booster] Generated {len(commons)} commons and {len(uncommons)} uncommons")
+        print(f"[booster] Generated complete pack in {generation_time:.2f}s")
         
         return jsonify({
             "set_code": set_code,
@@ -583,11 +670,65 @@ def api_booster_generate():
             "breakdown": {
                 "commons": len(commons),
                 "uncommons": len(uncommons)
-            }
+            },
+            "generation_time": round(generation_time, 2),
+            "cache_size_gb": round(_get_cache_size_gb(), 2),
+            "note": "Consider using /api/booster/single for progressive loading"
         })
         
     except Exception as e:
         print(f"[booster] Error generating pack: {e}", file=sys.stderr)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/api/booster/single")
+def api_booster_single_card():
+    """Get a single random card for progressive pack generation."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        set_code = payload.get("set_code", "").strip().lower()
+        rarity = payload.get("rarity", "").strip().lower()
+        
+        if not set_code:
+            return jsonify({"error": "Missing set_code parameter"}), 400
+        if not rarity:
+            return jsonify({"error": "Missing rarity parameter"}), 400
+        
+        print(f"[booster] Fetching single {rarity} card for {set_code}")
+        start_time = time.time()
+        
+        # Try to get from cache first
+        cached_cards = _get_cached_cards_for_set(set_code, rarity, 1)
+        
+        if cached_cards:
+            card = cached_cards[0]
+            fetch_time = time.time() - start_time
+            print(f"[booster] Served cached {rarity} card in {fetch_time:.3f}s: {card['name']}")
+            
+            return jsonify({
+                "card": card,
+                "from_cache": True,
+                "fetch_time": round(fetch_time, 3)
+            })
+        
+        # If no cached card, fetch a new one
+        new_cards = _get_random_cards_with_filter(set_code, rarity, 1)
+        
+        if not new_cards:
+            return jsonify({"error": f"No {rarity} cards found for set {set_code}"}), 404
+        
+        card = new_cards[0]
+        fetch_time = time.time() - start_time
+        print(f"[booster] Fetched fresh {rarity} card in {fetch_time:.3f}s: {card['name']}")
+        
+        return jsonify({
+            "card": card,
+            "from_cache": False,
+            "fetch_time": round(fetch_time, 3)
+        })
+        
+    except Exception as e:
+        print(f"[booster] Error fetching single card: {e}", file=sys.stderr)
         return jsonify({"error": str(e)}), 500
 
 
@@ -746,6 +887,7 @@ def _print_endpoints(host: str, port: int) -> None:
         f"    POST {base}/api/random/<player>",
         f"    GET  {base}/api/booster/sets",
         f"    POST {base}/api/booster/generate",
+        f"    POST {base}/api/booster/single",
         "",
         f"  BMP",
         f"    GET  {base}/bmp/all",
