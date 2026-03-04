@@ -108,20 +108,6 @@
         .card-slot img.loaded {
             opacity: 1;
         }
-        .card-slot img.flipping-out {
-            animation: flipOut 0.15s ease-in forwards;
-        }
-        .card-slot img.flipping-in {
-            animation: flipIn 0.15s ease-out forwards;
-        }
-        @keyframes flipOut {
-            from { transform: scaleX(1); }
-            to   { transform: scaleX(0); }
-        }
-        @keyframes flipIn {
-            from { transform: scaleX(0); }
-            to   { transform: scaleX(1); }
-        }
         .card-slot .send-overlay {
             position: absolute;
             bottom: 0;
@@ -196,6 +182,7 @@
             100% { opacity: 0.5; background-position: 0% 50%; }
         }
     </style>
+    <link rel="stylesheet" href="/static/card-flip.css">
 </head>
 <body>
     <div class="container">
@@ -223,7 +210,7 @@
 
         <div id="packGrid" class="pack-grid"></div>
     </div>
-
+    <script src="/static/card-flip.js"></script>
     <script>
         let allSets = [];
         let currentGeneration = null;
@@ -601,49 +588,36 @@
                 img.classList.add('loaded');
             };
 
+            let isAnimating = false;
+
             function flipTo(nextIndex) {
                 const nextSrc = nextIndex === -1 ? '/cardback.jpg' : faces[nextIndex];
 
-                const preload = new Image();
-                preload.onload = () => {
-                    img.classList.add('flipping-out');
-                    img.addEventListener('animationend', () => {
-                        img.classList.remove('flipping-out');
-                        img.src = nextSrc;
-
-                        if (nextIndex === -1) {
-                            img.alt = 'Card back';
-                            img.title = 'Click to reveal';
-                            rarityBadge.style.display = 'none';
-                            cardSlot.classList.remove('foil');
-                            cardSlot.classList.remove('revealed');
-                        } else if (nextIndex === 0) {
-                            img.alt = card.name;
-                            img.title = isDFC
-                                ? `${card.name} - click to see back face`
-                                : `${card.name} - ${card.rarity}${isFoil ? ' ✨' : ''}`;
-                            rarityBadge.style.display = '';
-                            if (isFoil) cardSlot.classList.add('foil');
-                            cardSlot.classList.add('revealed');
-                        } else {
-                            img.alt = `${card.name} (back face)`;
-                            img.title = `${card.name} - click to flip back`;
-                            rarityBadge.style.display = '';
-                            if (isFoil) cardSlot.classList.add('foil');
-                            cardSlot.classList.add('revealed');
-                        }
-
-                        faceIndex = nextIndex;
-                        cardSlot.dataset.faceIndex = String(nextIndex);
-                        img.classList.add('flipping-in');
-                        img.addEventListener('animationend', () => {
-                            img.classList.remove('flipping-in');
-                        }, { once: true });
-                    }, { once: true });
-                };
-                preload.src = nextSrc;
+                animatedCardFlip(img, nextSrc, () => {
+                    if (nextIndex === -1) {
+                        img.alt = 'Card back';
+                        img.title = 'Click to reveal';
+                        rarityBadge.style.display = 'none';
+                        cardSlot.classList.remove('foil', 'revealed');
+                    } else if (nextIndex === 0) {
+                        img.alt = card.name;
+                        img.title = isDFC
+                            ? `${card.name} - click to see back face`
+                            : `${card.name} - ${card.rarity}${isFoil ? ' ✨' : ''}`;
+                        rarityBadge.style.display = '';
+                        if (isFoil) cardSlot.classList.add('foil');
+                        cardSlot.classList.add('revealed');
+                    } else {
+                        img.alt = `${card.name} (back face)`;
+                        img.title = `${card.name} - click to flip`;
+                        rarityBadge.style.display = '';
+                        if (isFoil) cardSlot.classList.add('foil');
+                        cardSlot.classList.add('revealed');
+                    }
+                    faceIndex = nextIndex;
+                    cardSlot.dataset.faceIndex = String(nextIndex);
+                });
             }
-
             cardSlot.addEventListener('click', () => {
                 if (img.classList.contains('flipping-out') || img.classList.contains('flipping-in')) return;
 

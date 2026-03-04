@@ -81,6 +81,7 @@
         opacity: 0.95;
       }
     </style>
+    <link rel="stylesheet" href="/static/card-flip.css">
   </head>
   <body>
     <div class="stage">
@@ -98,7 +99,7 @@
         </div>
       </div>
     </div>
-
+    <script src="/static/card-flip.js"></script>
     <script>
       const PLAYER = {{ player|int }};
       const QR_HOST = "raspberrypi.local"; // IMPORTANT: resolves on other devices
@@ -193,17 +194,18 @@
         return f ? f.type_line : "";
       }
 
-      function showCurrentFace() {
+      function showCurrentFace(animate = false) {
         const f = faces && faces[faceIndex];
         if (!f || !f.image_url) return;
-        img.src = cacheBust(f.image_url);
-        renderCounter(currentFaceTypeLine());
+        animatedCardFlip(img, cacheBust(f.image_url), () => {
+            renderCounter(currentFaceTypeLine());
+        }, !animate || rotate);
       }
 
       clickCatcher.addEventListener("click", () => {
         if (!faces || faces.length < 2) return;
         faceIndex = (faceIndex + 1) % 2;
-        showCurrentFace();
+        showCurrentFace(true);   // animate on manual tap
       });
 
       async function loadQrLib() {
