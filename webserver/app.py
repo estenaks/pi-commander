@@ -267,7 +267,7 @@ def api_send_player(player: int):
     except Exception as e:
         return jsonify({"error": str(e)}), 502
 
-@app.patch("/api/premium/<int:player>")
+@app.post("/api/premium/<int:player>")
 def api_premium_player(player: int):
     """Set or clear the premium (foil) tag for a player's current card, without re-fetching from Scryfall."""
     _require_player(player)
