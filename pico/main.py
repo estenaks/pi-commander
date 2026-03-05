@@ -96,6 +96,74 @@ DARK_RED     = 0x6001   # -1 counter text
 DARK_BLUE_BG = 0x0102   # +1 counter rect background
 DARK_RED_BG  = 0x3000   # -1 counter rect background
 
+# ---- OTA ----
+
+OTA_VERSION_URL = SERVER + "/ota/version"
+OTA_SOURCE_URL  = SERVER + "/ota/main.py"
+OTA_SHA_FILE    = "/ota_sha.txt"   # stored on Pico flash
+
+
+def _ota_read_local_sha() -> str:
+    try:
+        with open(OTA_SHA_FILE) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def _ota_write_local_sha(sha: str):
+    with open(OTA_SHA_FILE, "w") as f:
+        f.write(sha)
+
+
+def ota_check_and_update():
+    """
+    Compare the server's git SHA for pico/main.py against the last-known SHA.
+    If different: download the new file, save it, persist the SHA, reboot.
+    Safe to call before display/touch init — only needs WiFi.
+    """
+    print("OTA: checking…")
+    try:
+        r = urequests.get(OTA_VERSION_URL, timeout=10)
+        data = r.json()
+        r.close()
+        remote_sha = data.get("sha", "")
+    except Exception as e:
+        print("OTA: version check failed:", e)
+        return  # non-fatal — carry on with existing main.py
+
+    local_sha = _ota_read_local_sha()
+    print(f"OTA: local={local_sha[:12] or 'none'}  remote={remote_sha[:12]}")
+
+    if remote_sha and remote_sha != local_sha:
+        print("OTA: update found — downloading…")
+        try:
+            r = urequests.get(OTA_SOURCE_URL, timeout=30)
+            new_code = r.content
+            r.close()
+        except Exception as e:
+            print("OTA: download failed:", e)
+            return  # non-fatal
+
+        # Write to a temp file first so a power-cut can't brick the Pico
+        with open("/main_new.py", "wb") as f:
+            f.write(new_code)
+
+        # Atomic-ish swap (MicroPython has no os.rename on flash, so we copy)
+        import os as _os
+        try:
+            _os.remove("/main.py")
+        except OSError:
+            pass
+        _os.rename("/main_new.py", "/main.py")
+
+        _ota_write_local_sha(remote_sha)
+        print("OTA: update applied — rebooting…")
+        import machine
+        machine.reset()  # reboot into the new code
+    else:
+        print("OTA: up to date.")
+
 
 # ---- Backlight ----
 
@@ -351,6 +419,7 @@ def touch_event(touch):
 def main():
     mount_sd()
     wifi_connect()
+    ota_check_and_update()
 
     bl           = Backlight(LCD_BL)
     lcd, lcd_spi = init_display()

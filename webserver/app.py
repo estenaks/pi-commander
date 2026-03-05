@@ -428,6 +428,33 @@ def bmp_all():
     ]
     return jsonify({"files": files})
 
+# ---- OTA routes ----
+
+import subprocess
+import hashlib
+
+@app.get("/ota/version")
+def ota_version():
+    """Return the current git SHA of pico/main.py so the Pico can detect updates."""
+    try:
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sha = subprocess.check_output(
+            ["git", "log", "-1", "--format=%H", "pico/main.py"],
+            cwd=repo_root,
+            text=True,
+        ).strip()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"sha": sha})
+
+
+@app.get("/ota/main.py")
+def ota_main():
+    """Serve the latest pico/main.py for the Pico to download."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(repo_root, "pico", "main.py")
+    return send_file(path, mimetype="text/plain")
+
 
 def _print_endpoints(host: str, port: int) -> None:
     ip = LOCAL_IP
