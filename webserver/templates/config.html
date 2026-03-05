@@ -149,6 +149,22 @@
 				max-width: 520px;
 				word-break: break-word;
 			}
+			#foilBtn {
+				transition:
+					background 0.2s,
+					border-color 0.2s,
+					color 0.2s;
+			}
+			#foilBtn.foil-on {
+				background: linear-gradient(135deg, #b8860b, #ffd700, #b8860b);
+				border-color: #ffd700;
+				color: #1a1100;
+				font-weight: bold;
+			}
+			#foilBtn:disabled {
+				opacity: 0.35;
+				cursor: not-allowed;
+			}
 		</style>
 	</head>
 	<body>
@@ -169,6 +185,13 @@
 			/>
 			<button id="searchBtn">Search</button>
 			<button id="randomBtn">Get random commander</button>
+			<button
+				id="foilBtn"
+				disabled
+				title="Toggle foil on the current commander"
+			>
+				✨ Foil
+			</button>
 		</div>
 
 		<div class="qrBox" aria-label="QR code for selected player view">
@@ -217,9 +240,12 @@
 			const statusEl = document.getElementById("status");
 			const previewEl = document.getElementById("preview");
 			const jsonEl = document.getElementById("json");
-
 			const qrCanvas = document.getElementById("qr");
 			const qrLabelEl = document.getElementById("qrLabel");
+			const foilBtn = document.getElementById("foilBtn");
+
+			let lastQuery = null; // tracks the most recently sent card name
+			let isFoil = false; // current foil state for the selected player
 
 			function setBusy(msg) {
 				statusEl.textContent = msg;
@@ -342,6 +368,9 @@
 
 				statusEl.textContent = `Player ${p} now showing: ${data.name}`;
 				previewEl.src = data.border_crop_url;
+				lastQuery = data.name;
+				isFoil = false;
+				updateFoilBtn();
 			}
 
 			async function doRandomCommander() {
@@ -365,6 +394,20 @@
 
 				statusEl.textContent = `Player ${p} now showing (random commander): ${data.name}`;
 				previewEl.src = data.border_crop_url;
+				lastQuery = data.name;
+				isFoil = false;
+				updateFoilBtn();
+			}
+
+			function updateFoilBtn() {
+				foilBtn.disabled = !lastQuery;
+				if (isFoil) {
+					foilBtn.textContent = "✨ Foil: ON";
+					foilBtn.classList.add("foil-on");
+				} else {
+					foilBtn.textContent = "✨ Foil";
+					foilBtn.classList.remove("foil-on");
+				}
 			}
 
 			document
@@ -375,6 +418,25 @@
 				.addEventListener("click", () => doRandomCommander());
 			qEl.addEventListener("keydown", (e) => {
 				if (e.key === "Enter") doSearch(qEl.value);
+			});
+			foilBtn.addEventListener("click", async () => {
+				if (!lastQuery) return;
+				const p = playerNum();
+				const nextFoil = !isFoil;
+
+				foilBtn.disabled = true;
+				foilBtn.textContent = "...";
+
+				const { r } = await postJson(`/api/premium/${p}`, {
+					premium: nextFoil ? "foil" : null,
+				});
+
+				if (r.ok) {
+					isFoil = nextFoil;
+				} else {
+					statusEl.textContent = "Error toggling foil";
+				}
+				updateFoilBtn();
 			});
 
 			// initial
