@@ -506,20 +506,36 @@ def _get_booster_config(set_code: str) -> dict:
     url = MTGJSON_SET_URL.format(code=set_code.upper())
 
     try:
+        import urllib.request
         import json as _json
 
         req = urllib.request.Request(url, headers={"User-Agent": "pi-commander/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             raw = _json.loads(resp.read().decode())
 
-        booster_section = raw.get("data", {}).get("booster", {})
+        # --- DEBUG LOGGING ---
+        data_keys = list(raw.get("data", {}).keys())
+        print(f"[booster_config] MTGJSON top-level data keys for {set_code}: {data_keys}")
 
-        # Prefer "draft" booster type, then "default", then first available
+        booster_section = raw.get("data", {}).get("booster", {})
+        print(f"[booster_config] booster section keys: {list(booster_section.keys())}")
+
         booster_data = (
             booster_section.get("draft")
             or booster_section.get("default")
             or next(iter(booster_section.values()), None)
         )
+
+        print(f"[booster_config] booster_data is None: {booster_data is None}")
+        if booster_data:
+            print(f"[booster_config] booster_data keys: {list(booster_data.keys())}")
+            raw_slots = booster_data.get("slots", [])
+            sheets = booster_data.get("sheets", {})
+            print(f"[booster_config] raw_slots count: {len(raw_slots)}")
+            print(f"[booster_config] sheets keys: {list(sheets.keys())}")
+            for i, slot in enumerate(raw_slots[:5]):  # first 5 slots
+                print(f"[booster_config]   slot[{i}]: {slot}")
+        # --- END DEBUG LOGGING ---
 
         if booster_data:
             slots = _parse_mtgjson_slots(booster_data)
