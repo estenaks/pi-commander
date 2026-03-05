@@ -222,7 +222,27 @@ def api_current_player(player: int):
             "card_id": st["card_id"],
             "faces": st["faces_meta"],
             "border_crop_url": st["border_crop_url"],
+            "premium": st["premium"],
         })
+
+@app.post("/api/send/<int:player>")
+def api_send_player(player: int):
+    """Send a card to a player, with optional premium tag."""
+    _require_player(player)
+    payload = request.get_json(silent=True) or {}
+    query = (payload.get("q") or "").strip()
+    premium = payload.get("premium") or None  # e.g. "foil" or null
+    if not query:
+        return jsonify({"error": "Missing JSON field 'q'"}), 400
+
+    try:
+        params = urllib.parse.urlencode({"fuzzy": query})
+        url = f"https://api.scryfall.com/cards/named?{params}"
+        card = _scryfall_get(url)
+        data = _set_player_state(player, last_query=query, card=card, premium=premium)
+        return jsonify({"ok": True, "player": player, "name": card.get("name"), "premium": premium, **data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
 
 
 @app.post("/api/search/<int:player>")
@@ -363,6 +383,7 @@ def _print_endpoints(host: str, port: int) -> None:
         f"    POST {base}/api/random/<player>",
         f"    GET  {base}/api/booster/sets",
         f"    POST {base}/api/booster/single",
+        f"    POST {base}/api/send/<player>",
         "",
         f"  BMP",
         f"    GET  {base}/bmp/all",

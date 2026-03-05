@@ -26,6 +26,7 @@ _state_by_player = {
         "card_id": None,
         "faces_meta": [],
         "border_crop_url": None,
+        "premium": None,   # e.g. "foil" etc, or None
     }
     for p in PLAYERS
 }
@@ -168,7 +169,7 @@ def _generate_bmps(player: int) -> None:
             print(f"[bmp] Error generating {face} BMP for player {player}: {exc}", file=sys.stderr)
 
 
-def _set_player_state(player: int, *, last_query: str, card: dict) -> dict:
+def _set_player_state(player: int, *, last_query: str, card: dict, premium: str | None = None) -> dict:
     faces_meta = _extract_faces_meta_always_two(card)
     if not faces_meta:
         raise RuntimeError("No suitable image found for this card")
@@ -181,12 +182,14 @@ def _set_player_state(player: int, *, last_query: str, card: dict) -> dict:
         st["card_id"] = card.get("id")
         st["faces_meta"] = faces_meta
         st["border_crop_url"] = border_crop
+        st["premium"] = premium
 
         result = {
             "last_query": st["last_query"],
             "card_id": st["card_id"],
             "faces": st["faces_meta"],
             "border_crop_url": st["border_crop_url"],
+            "premium": st["premium"],
         }
 
     _generate_bmps(player)

@@ -82,6 +82,7 @@
       }
     </style>
     <link rel="stylesheet" href="/static/card-flip.css">
+    <link rel="stylesheet" href="/static/premium-effects.css">
   </head>
   <body>
     <div class="stage">
@@ -300,6 +301,12 @@
 
           faces = nextFaces;
           faceIndex = Math.min(faceIndex, Math.max(0, faces.length - 1));
+
+          // Determine if this card is dual-faced (face[1] has a real image, not the cardback sentinel)
+          const isDFC = faces.length >= 2 && faces[1] && faces[1].image_url !== "/cardback.jpg";
+
+          // Apply/remove foil on every poll — also called after faceIndex changes via click
+          applyFoil(data.premium || null, isDFC);
 
           const key = `${cardId || "noid"}:${faceIndex}:${faces[faceIndex]?.image_url || ""}`;
           if (key !== lastRenderedKey) {
