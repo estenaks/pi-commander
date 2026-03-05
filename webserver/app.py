@@ -1,5 +1,6 @@
 import io
 import sys
+import socket
 import threading
 import urllib.parse
 
@@ -32,23 +33,45 @@ app = Flask(__name__)
 
 CARD_BACK_PATH = os.path.join(os.path.dirname(__file__), "cardback.jpg")
 CARD_BACK_WEB_URL = "/cardback.jpg"
-CONFIG_PORT = ""
+
+# Port suffix — use ":8000" for dev, comment out (set to "") for prod on port 80
+DEV_PORT = ":8000"
+# DEV_PORT = ""
 
 EXCLUDED_SET_CODES = {
     "pred",
     "h17",
     "phtr",
     "punk",
-    "klr"
+    "klr",
+    "h2r"
 }
 
 # Wire path/URL constants into submodules
 _images_module.CARD_BACK_PATH = CARD_BACK_PATH
 _images_module.CARD_BACK_WEB_URL = CARD_BACK_WEB_URL
-_images_module.CONFIG_PORT = CONFIG_PORT
 
 # Pre-generate fallback BMPs at startup
 _CONFIG_PROMPT_BMP, _CARD_BACK_BMP = init_fallback_bmps(CARD_BACK_PATH)
+
+
+def _get_local_ip() -> str:
+    """Return the LAN IP of this machine, e.g. 192.168.1.42"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
+LOCAL_IP = _get_local_ip()
+
+# Inject into all templates as a global
+app.jinja_env.globals["LOCAL_IP"] = LOCAL_IP
+app.jinja_env.globals["DEV_PORT"] = DEV_PORT
 
 
 # ---- Routes ----
@@ -362,12 +385,13 @@ def bmp_all():
 
 
 def _print_endpoints(host: str, port: int) -> None:
-    base = f"http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"
+    ip = LOCAL_IP
+    base = f"http://{ip}{DEV_PORT}"
     lines = [
         "",
         "  pi-commander running — endpoints:",
         "",
-        f"  Browser",
+        "  Browser",
         f"    {base}/",
         f"    {base}/face",
         f"    {base}/player2",
@@ -377,7 +401,7 @@ def _print_endpoints(host: str, port: int) -> None:
         f"    {base}/booster",
         f"    {base}/cardback.jpg",
         "",
-        f"  API",
+        "  API",
         f"    GET  {base}/api/current/<player>",
         f"    POST {base}/api/search/<player>",
         f"    POST {base}/api/random/<player>",
@@ -385,7 +409,7 @@ def _print_endpoints(host: str, port: int) -> None:
         f"    POST {base}/api/booster/single",
         f"    POST {base}/api/send/<player>",
         "",
-        f"  BMP",
+        "  BMP",
         f"    GET  {base}/bmp/all",
         f"    GET  {base}/bmp/1/front   {base}/bmp/1/back",
         f"    GET  {base}/bmp/2/front   {base}/bmp/2/back",
@@ -394,6 +418,19 @@ def _print_endpoints(host: str, port: int) -> None:
         "",
     ]
     print("\n".join(lines))
+
+    # QR code for /face in the console
+    try:
+        import qrcode
+        face_url = f"{base}/face"
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(face_url)
+        qr.make(fit=True)
+        print(f"  Scan to open /face on your phone ({face_url}):")
+        qr.print_ascii(invert=True)
+        print()
+    except ImportError:
+        print(f"  /face → {base}/face  (install 'qrcode' for ASCII QR in console)\n")
 
 
 if __name__ == "__main__":
