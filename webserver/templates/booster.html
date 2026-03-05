@@ -187,10 +187,6 @@
 				background: #8b4513;
 				color: #fff;
 			}
-			.rarity-wildcard {
-				background: #9b59b6;
-				color: #fff;
-			}
 			.rarity-list {
 				background: #2c7a2c;
 				color: #fff;
@@ -203,7 +199,7 @@
 				font-size: 12px;
 				color: #ccc;
 			}
-			/* QR overlay shown after sending a card to a player */
+			/* QR overlay */
 			#sendQrOverlay {
 				display: none;
 				position: fixed;
@@ -235,7 +231,7 @@
 				color: #aaa;
 				font-size: 13px;
 			}
-			/* Pack type badge shown in set info */
+			/* Pack-type badge in set info bar */
 			.pack-type-badge {
 				display: inline-block;
 				padding: 2px 8px;
@@ -245,16 +241,20 @@
 				margin-left: 8px;
 				vertical-align: middle;
 			}
+			.pack-type-pre-foil {
+				background: #555;
+				color: #ccc;
+			}
 			.pack-type-draft {
 				background: #3a6baf;
 				color: #fff;
 			}
-			.pack-type-play {
-				background: #7a3aaf;
-				color: #fff;
-			}
 			.pack-type-masters {
 				background: #af6b3a;
+				color: #fff;
+			}
+			.pack-type-play {
+				background: #7a3aaf;
 				color: #fff;
 			}
 		</style>
@@ -300,43 +300,295 @@
 
 			<div id="packGrid" class="pack-grid"></div>
 		</div>
+
 		<div id="sendQrOverlay" onclick="hideSendQr()">
 			<canvas id="sendQrCanvas" width="220" height="220"></canvas>
 			<div class="qr-label" id="sendQrLabel"></div>
 			<div class="qr-hint">Tap anywhere to dismiss</div>
 		</div>
+
 		<script src="/static/card-flip.js"></script>
 		<script>
 			const BASE_URL = "http://{{ LOCAL_IP }}{{ DEV_PORT }}";
 
 			// ── Era cutoff dates ──────────────────────────────────────────────────────
-			// Foils first appeared in Urza's Legacy (1999-02-15).
-			// Play Boosters replaced Draft+Set boosters from Murders at Karlov Manor
-			// (2024-02-02) onwards.
-			const FOIL_DEBUT = new Date("1999-02-15"); // first set with foils
+			const FOIL_DEBUT = new Date("1999-02-15"); // Urza's Legacy
 			const PLAY_BOOSTER_DEBUT = new Date("2024-02-02"); // Murders at Karlov Manor
 
-			// ── Foil rates by era ─────────────────────────────────────────────────────
-			// Draft era (1999-02-15 → 2024-02-01):
-			//   ~1-in-3 packs contain a foil that REPLACES one common.
-			//   This means one of the 10 common slots has a ~1/3 chance of being foil.
-			//   We model this as a single pack-level roll.
+			// Draft-era foil rate: ~1-in-3 packs contains a foil that replaces a common
 			const DRAFT_FOIL_RATE = 1 / 3;
 
-			// Play Booster era (2024-02-02+):
-			//   Every pack has exactly 1 guaranteed foil in a dedicated slot.
-			//   No roll needed — it's always present.
-
-			// ── Masters / draft_innovation pack sizes ─────────────────────────────────
-			// Masters sets: 15 cards — 10 commons, 3 uncommons, 1 rare, 1 foil (guaranteed)
-			// (Masters sets always have a guaranteed foil regardless of era)
+			// Masters / draft_innovation sets always have a guaranteed foil
 			const MASTERS_SET_TYPES = new Set(["masters", "draft_innovation"]);
+
+			// Foil rarity weights (used for both the dedicated foil slot and draft replacements)
+			// Heavily common-weighted to match real pull rates
+			const FOIL_RARITY_WEIGHTS = [
+				{ rarity: "common", weight: 55 },
+				{ rarity: "uncommon", weight: 25 },
+				{ rarity: "rare", weight: 15 },
+				{ rarity: "mythic", weight: 5 },
+			];
+
+			// Play Booster wildcard rarity weights
+			const WILDCARD_RARITY_WEIGHTS = [
+				{ rarity: "common", weight: 56 },
+				{ rarity: "uncommon", weight: 26 },
+				{ rarity: "rare", weight: 14 },
+				{ rarity: "mythic", weight: 4 },
+			];
 
 			let allSets = [];
 			let currentGeneration = null;
-			let packSize = 15;
+			let packSize = 15; // updated per-pack from the manifest
 
-			// ── Send QR overlay ───────────────────────────────────────────────────────
+			// ── Weighted random rarity picker ─────────────────────────────────────────
+			function rollWeightedRarity(weights) {
+				const total = weights.reduce((s, r) => s + r.weight, 0);
+				let roll = Math.random() * total;
+				for (const { rarity, weight } of weights) {
+					roll -= weight;
+					if (roll <= 0) return rarity;
+				}
+				return weights[0].rarity;
+			}
+
+			// ── Pack profile ──────────────────────────────────────────────────────────
+			/**
+			 * Returns a descriptor for the booster format of a given set object.
+			 * { format, packLabel, foilGuaranteed, foilRate, foilReplacesCommon }
+			 */
+			function getPackProfile(set) {
+				const setDate = new Date(set.released_at);
+				const setType = set.set_type || "";
+
+				if (setDate < FOIL_DEBUT) {
+					return {
+						format: "pre-foil",
+						packLabel: "Pre-Foil",
+						foilGuaranteed: false,
+						foilRate: 0,
+						foilReplacesCommon: false,
+					};
+				}
+				if (MASTERS_SET_TYPES.has(setType)) {
+					return {
+						format: "masters",
+						packLabel: "Masters",
+						foilGuaranteed: true,
+						foilRate: 1,
+						foilReplacesCommon: false,
+					};
+				}
+				if (setDate >= PLAY_BOOSTER_DEBUT) {
+					return {
+						format: "play",
+						packLabel: "Play Booster",
+						foilGuaranteed: true,
+						foilRate: 1,
+						foilReplacesCommon: false,
+					};
+				}
+				return {
+					format: "draft",
+					packLabel: "Draft Booster",
+					foilGuaranteed: false,
+					foilRate: DRAFT_FOIL_RATE,
+					foilReplacesCommon: true,
+				};
+			}
+
+			// ── Slot manifest builder ─────────────────────────────────────────────────
+			/**
+			 * Builds the complete ordered list of card slots for this pack, with all
+			 * random decisions resolved upfront (foil? list? wildcard rarity?).
+			 *
+			 * Card order for every format (as requested):
+			 *   commons → uncommons → rare/mythic → foil (if present) → list/CU → land
+			 *
+			 * Each slot: { type, label, apiRarity, isFoil, setCode }
+			 *   - type:      logical slot type ("common"|"uncommon"|"rare"|"foil"|"list"|"land")
+			 *   - label:     placeholder text shown while loading
+			 *   - apiRarity: what to pass to /api/booster/single
+			 *   - isFoil:    whether to render with foil treatment on reveal
+			 *   - setCode:   which set to pull from ("plist" for list cards)
+			 */
+			function buildSlotManifest(set, profile, hasFoil) {
+				const code = set.code;
+				const slots = [];
+
+				if (profile.format === "play") {
+					// Play Booster:
+					// Resolve wildcard rarity upfront — it goes with the matching rarity group
+					const wcRarity = rollWeightedRarity(WILDCARD_RARITY_WEIGHTS);
+					// Resolve list slot upfront (12.5% = list from plist, else common from set)
+					const isListHit = Math.random() < 0.125;
+					// Resolve foil rarity upfront
+					const foilRarity = rollWeightedRarity(FOIL_RARITY_WEIGHTS);
+
+					// Count wild card into the appropriate rarity bucket for display ordering:
+					// commons (6 + wildcard if common), uncommons (3 + wildcard if uncommon),
+					// rares (1 + wildcard if rare/mythic), then foil, then list/CU, then land
+
+					const commonCount = 6 + (wcRarity === "common" ? 1 : 0);
+					const uncommonCount = 3 + (wcRarity === "uncommon" ? 1 : 0);
+					// rare slot: always 1; if wildcard is rare/mythic an extra one appears
+					const rareCount =
+						1 + (wcRarity === "rare" || wcRarity === "mythic" ? 1 : 0);
+
+					for (let i = 0; i < commonCount; i++)
+						slots.push({
+							type: "common",
+							label: "Common",
+							apiRarity: "common",
+							isFoil: false,
+							setCode: code,
+						});
+					for (let i = 0; i < uncommonCount; i++)
+						slots.push({
+							type: "uncommon",
+							label: "Uncommon",
+							apiRarity: "uncommon",
+							isFoil: false,
+							setCode: code,
+						});
+					for (let i = 0; i < rareCount; i++)
+						slots.push({
+							type: "rare",
+							label: "Rare",
+							apiRarity: "rare",
+							isFoil: false,
+							setCode: code,
+						});
+
+					// Foil slot (guaranteed, any rarity — weighted to actual foil rarity)
+					slots.push({
+						type: "foil",
+						label: "✨ Foil",
+						apiRarity: foilRarity,
+						isFoil: true,
+						setCode: code,
+					});
+
+					// List / CU slot — resolved NOW so the label and badge are correct
+					if (isListHit) {
+						slots.push({
+							type: "list",
+							label: "📋 List",
+							apiRarity: "any",
+							isFoil: false,
+							setCode: "plist",
+						});
+					} else {
+						slots.push({
+							type: "common",
+							label: "Common",
+							apiRarity: "common",
+							isFoil: false,
+							setCode: code,
+						});
+					}
+
+					// Land
+					slots.push({
+						type: "land",
+						label: "Land",
+						apiRarity: "land",
+						isFoil: false,
+						setCode: code,
+					});
+				} else if (profile.format === "masters") {
+					// Masters: 10 commons, 3 uncommons, 1 rare, 1 dedicated foil (any rarity)
+					const foilRarity = rollWeightedRarity(FOIL_RARITY_WEIGHTS);
+
+					for (let i = 0; i < 10; i++)
+						slots.push({
+							type: "common",
+							label: "Common",
+							apiRarity: "common",
+							isFoil: false,
+							setCode: code,
+						});
+					for (let i = 0; i < 3; i++)
+						slots.push({
+							type: "uncommon",
+							label: "Uncommon",
+							apiRarity: "uncommon",
+							isFoil: false,
+							setCode: code,
+						});
+					slots.push({
+						type: "rare",
+						label: "Rare",
+						apiRarity: "rare",
+						isFoil: false,
+						setCode: code,
+					});
+					slots.push({
+						type: "foil",
+						label: "✨ Foil",
+						apiRarity: foilRarity,
+						isFoil: true,
+						setCode: code,
+					});
+				} else {
+					// Draft / Pre-foil:
+					// Order: commons (9 or 10) → uncommons (3) → rare (1) → foil (if hit) → land
+					// The foil, if present, follows the rare rather than displacing a common in
+					// the visual layout — even though statistically it "replaces" a common slot.
+					// This keeps the ordering consistent and predictable for the viewer.
+					const commonCount = hasFoil && profile.foilReplacesCommon ? 9 : 10;
+					const foilRarity = hasFoil
+						? rollWeightedRarity(FOIL_RARITY_WEIGHTS)
+						: null;
+
+					for (let i = 0; i < commonCount; i++)
+						slots.push({
+							type: "common",
+							label: "Common",
+							apiRarity: "common",
+							isFoil: false,
+							setCode: code,
+						});
+					for (let i = 0; i < 3; i++)
+						slots.push({
+							type: "uncommon",
+							label: "Uncommon",
+							apiRarity: "uncommon",
+							isFoil: false,
+							setCode: code,
+						});
+					slots.push({
+						type: "rare",
+						label: "Rare",
+						apiRarity: "rare",
+						isFoil: false,
+						setCode: code,
+					});
+
+					if (hasFoil) {
+						slots.push({
+							type: "foil",
+							label: "✨ Foil",
+							apiRarity: foilRarity,
+							isFoil: true,
+							setCode: code,
+						});
+					}
+
+					slots.push({
+						type: "land",
+						label: "Land",
+						apiRarity: "land",
+						isFoil: false,
+						setCode: code,
+					});
+				}
+
+				return slots;
+			}
+
+			// ── QR overlay ────────────────────────────────────────────────────────────
 			let sendQrLibLoaded = false;
 			async function ensureSendQrLib() {
 				if (sendQrLibLoaded) return;
@@ -386,7 +638,7 @@
 					await ensureSendQrLib();
 					drawQrToCanvas(url, canvas);
 				} catch {
-					/* silently skip QR if lib fails */
+					/* skip */
 				}
 				document.getElementById("sendQrOverlay").classList.add("visible");
 			}
@@ -402,132 +654,12 @@
 				}
 			}
 
-			// ── Pack type determination ───────────────────────────────────────────────
-			/**
-			 * Given a set object from the API, return a descriptor for which booster
-			 * format this set uses and what foil behaviour to apply.
-			 *
-			 * Returns an object:
-			 * {
-			 *   format:          "pre-foil" | "draft" | "masters" | "play",
-			 *   packSize:        number,           // total playable card slots
-			 *   foilGuaranteed:  boolean,          // is there always a foil?
-			 *   foilRate:        number,            // 0–1 probability (ignored if guaranteed)
-			 *   foilReplacesCommon: boolean,        // true = foil takes a common slot
-			 *   label:           string,            // human-readable badge
-			 * }
-			 */
-			function getPackProfile(set) {
-				const setDate = new Date(set.released_at);
-				const setType = set.set_type || "";
-
-				// Era 0: no foils at all
-				if (setDate < FOIL_DEBUT) {
-					return {
-						format: "pre-foil",
-						packSize: 15,
-						foilGuaranteed: false,
-						foilRate: 0,
-						foilReplacesCommon: false,
-						label: "Pre-Foil",
-					};
-				}
-
-				// Masters / draft_innovation sets always have a guaranteed foil slot
-				// regardless of era (they were designed that way from inception).
-				// Structure: 10 commons, 3 uncommons, 1 rare/mythic, 1 foil (any rarity)
-				if (MASTERS_SET_TYPES.has(setType)) {
-					return {
-						format: "masters",
-						packSize: 15,
-						foilGuaranteed: true,
-						foilRate: 1,
-						foilReplacesCommon: false, // dedicated slot
-						label: "Masters",
-					};
-				}
-
-				// Era 3: Play Boosters (Murders at Karlov Manor 2024-02-02+)
-				// Structure: 6 commons, 3 uncommons, 1 rare/mythic, 1 wildcard (any rarity),
-				//            1 list/CU slot, 1 guaranteed foil (any rarity), 1 land = 14 slots
-				if (setDate >= PLAY_BOOSTER_DEBUT) {
-					return {
-						format: "play",
-						packSize: 14,
-						foilGuaranteed: true,
-						foilRate: 1,
-						foilReplacesCommon: false, // dedicated foil slot
-						label: "Play Booster",
-					};
-				}
-
-				// Era 1 & 2: Classic Draft Boosters (1999-02-15 → 2024-02-01)
-				// ~1-in-3 packs have a foil that REPLACES one of the 10 commons.
-				// The pack size stays at 15 whether or not there's a foil.
-				return {
-					format: "draft",
-					packSize: 15,
-					foilGuaranteed: false,
-					foilRate: DRAFT_FOIL_RATE,
-					foilReplacesCommon: true,
-					label: "Draft Booster",
-				};
-			}
-
-			// ── Foil rarity weights (used when picking a foil from "any" rarity) ──────
-			// In any era where the foil slot can be any rarity, the distribution is
-			// heavily weighted toward commons.  These weights are approximate and match
-			// real-world pull rates:
-			//   common   ~55%,  uncommon ~25%,  rare ~15%,  mythic ~5%
-			// The backend "any" rarity pick already selects uniformly from all cards, so
-			// these weights are applied client-side when deciding what *type* of card to
-			// request for the foil slot.
-			const FOIL_RARITY_WEIGHTS = [
-				{ rarity: "common", weight: 55 },
-				{ rarity: "uncommon", weight: 25 },
-				{ rarity: "rare", weight: 15 },
-				{ rarity: "mythic", weight: 5 },
-			];
-
-			function rollFoilRarity() {
-				const total = FOIL_RARITY_WEIGHTS.reduce((s, r) => s + r.weight, 0);
-				let roll = Math.random() * total;
-				for (const { rarity, weight } of FOIL_RARITY_WEIGHTS) {
-					roll -= weight;
-					if (roll <= 0) return rarity;
-				}
-				return "common";
-			}
-
-			// ── Wildcard rarity weights for Play Booster wildcard slot ────────────────
-			// Play Booster wildcard: ~56% common, ~26% uncommon, ~14% rare, ~4% mythic
-			const WILDCARD_RARITY_WEIGHTS = [
-				{ rarity: "common", weight: 56 },
-				{ rarity: "uncommon", weight: 26 },
-				{ rarity: "rare", weight: 14 },
-				{ rarity: "mythic", weight: 4 },
-			];
-
-			function rollWildcardRarity() {
-				const total = WILDCARD_RARITY_WEIGHTS.reduce((s, r) => s + r.weight, 0);
-				let roll = Math.random() * total;
-				for (const { rarity, weight } of WILDCARD_RARITY_WEIGHTS) {
-					roll -= weight;
-					if (roll <= 0) return rarity;
-				}
-				return "common";
-			}
-
-			// ── Load sets on page load ────────────────────────────────────────────────
+			// ── Set loading ───────────────────────────────────────────────────────────
 			async function loadSets() {
 				try {
 					const response = await fetch("/api/booster/sets");
 					const data = await response.json();
-
-					if (data.error) {
-						throw new Error(data.error);
-					}
-
+					if (data.error) throw new Error(data.error);
 					allSets = data.sets;
 					populateSetSelect();
 				} catch (error) {
@@ -539,7 +671,6 @@
 				const select = document.getElementById("setSelect");
 				select.innerHTML = '<option value="">-- Choose a set --</option>';
 
-				// Sort sets by release date (newest first)
 				const sortedSets = allSets
 					.filter((set) => set.card_count > 0)
 					.sort((a, b) => new Date(b.released_at) - new Date(a.released_at));
@@ -553,12 +684,9 @@
 				});
 
 				select.addEventListener("change", function () {
-					const generateBtn = document.getElementById("generateBtn");
-					generateBtn.disabled = !this.value;
-
+					document.getElementById("generateBtn").disabled = !this.value;
 					if (this.value) {
-						const selectedSet = allSets.find((s) => s.code === this.value);
-						updateSetInfo(selectedSet);
+						updateSetInfo(allSets.find((s) => s.code === this.value));
 					} else {
 						document.getElementById("setInfo").innerHTML = "";
 					}
@@ -566,26 +694,21 @@
 			}
 
 			function updateSetInfo(set) {
-				const setInfoDiv = document.getElementById("setInfo");
 				const profile = getPackProfile(set);
-				const badgeClass = `pack-type-${profile.format === "pre-foil" ? "draft" : profile.format}`;
-
-				let infoHtml = `<span style="font-family: monospace; background: #3a3a3a; padding: 2px 6px; border-radius: 3px; margin-right: 8px;">${set.code}</span>${set.card_count} cards • Released: ${set.released_at}`;
-				infoHtml += `<span class="pack-type-badge ${badgeClass}">${profile.label}</span>`;
-
+				const badgeClass = `pack-type-${profile.format}`;
+				let html = `<span style="font-family:monospace;background:#3a3a3a;padding:2px 6px;border-radius:3px;margin-right:8px">${set.code}</span>${set.card_count} cards • Released: ${set.released_at}<span class="pack-type-badge ${badgeClass}">${profile.packLabel}</span>`;
 				if (set.icon_svg_uri) {
-					infoHtml =
-						`<img src="${set.icon_svg_uri}" alt="${set.name} icon" style="width: 20px; height: 20px; margin-right: 8px; vertical-align: middle; filter: drop-shadow(0px 0px 0px rgba(0,0,0,0.5));">` +
-						infoHtml;
+					html =
+						`<img src="${set.icon_svg_uri}" alt="${set.name} icon" style="width:20px;height:20px;margin-right:8px;vertical-align:middle">` +
+						html;
 				}
-
-				setInfoDiv.innerHTML = infoHtml;
+				document.getElementById("setInfo").innerHTML = html;
 			}
 
+			// ── Pack generation entry points ──────────────────────────────────────────
 			async function generatePack() {
 				const setCode = document.getElementById("setSelect").value;
 				if (!setCode) return;
-
 				await generatePackForSet(setCode);
 			}
 
@@ -593,65 +716,48 @@
 				const eligibleSets = allSets.filter((set) => set.card_count > 50);
 				const randomSet =
 					eligibleSets[Math.floor(Math.random() * eligibleSets.length)];
-
 				document.getElementById("setSelect").value = randomSet.code;
 				updateSetInfo(randomSet);
-
 				await generatePackForSet(randomSet.code);
 			}
 
 			async function generatePackForSet(setCode) {
-				// Cancel any ongoing generation
-				if (currentGeneration) {
-					currentGeneration.cancelled = true;
-				}
+				if (currentGeneration) currentGeneration.cancelled = true;
 
 				const selectedSet = allSets.find((s) => s.code === setCode);
 				const profile = getPackProfile(selectedSet);
 
-				// Determine whether this pack will contain a foil
+				// Decide whether this pack has a foil
 				const hasFoil =
 					profile.foilGuaranteed ||
 					(profile.foilRate > 0 && Math.random() < profile.foilRate);
 
-				// For draft era, the foil replaces a common — pack stays 15 cards.
-				// For play/masters, the foil is a dedicated extra slot.
-				packSize = profile.packSize;
+				// Build the full manifest now — all random decisions resolved
+				const slots = buildSlotManifest(selectedSet, profile, hasFoil);
+				packSize = slots.length;
 
-				currentGeneration = {
-					cancelled: false,
-					cardCount: 0,
-					profile,
-					hasFoil,
-				};
-
+				currentGeneration = { cancelled: false, cardCount: 0, slots };
 				showLoading(true);
 				hideError();
-				setupPackGrid(profile, hasFoil);
+				setupPackGrid(slots);
 
 				try {
 					await generatePackProgressive(setCode, currentGeneration);
 				} catch (error) {
-					if (!currentGeneration.cancelled) {
+					if (!currentGeneration.cancelled)
 						showError("Failed to generate pack: " + error.message);
-					}
 				} finally {
 					showLoading(false);
-					if (!currentGeneration.cancelled) {
-						currentGeneration = null;
-					}
+					if (!currentGeneration.cancelled) currentGeneration = null;
 				}
 			}
 
-			// ── setupPackGrid ──────────────────────────────────────────────────────��──
-			// Builds the visual placeholder slots according to pack format.
-			function setupPackGrid(profile, hasFoil) {
+			// ── Grid setup (placeholder slots, labels already final) ─────────────────
+			function setupPackGrid(slots) {
 				document.getElementById("flipAllBtn").style.display = "none";
 				document.getElementById("flipAllBtn").textContent = "Flip All";
 				const grid = document.getElementById("packGrid");
 				grid.innerHTML = "";
-
-				const slots = buildSlotManifest(profile, hasFoil);
 
 				for (let i = 0; i < slots.length; i++) {
 					const cardSlot = document.createElement("div");
@@ -667,163 +773,11 @@
 				}
 			}
 
-			// ── buildSlotManifest ─────────────────────────────────────────────────────
-			/**
-			 * Returns an array of slot descriptors that fully describes the pack.
-			 * Each slot: { type, label, rarity, isFoil }
-			 *
-			 * Draft booster (with foil):     9C + foil + 3U + 1R + 1Land  = 15
-			 * Draft booster (no foil):      10C       + 3U + 1R + 1Land  = 15
-			 * Masters booster:              10C       + 3U + 1R + 1foil  = 15  (foil dedicated)
-			 * Play booster:                  6C + 3U + 1R + 1wild + 1list + 1foil + 1land = 14
-			 * Pre-foil:                     10C       + 3U + 1R + 1Land  = 15
-			 */
-			function buildSlotManifest(profile, hasFoil) {
-				const slots = [];
-
-				if (profile.format === "play") {
-					// Play Booster — fixed 14-slot structure
-					// 6 commons
-					for (let i = 0; i < 6; i++)
-						slots.push({
-							type: "common",
-							label: "Common",
-							rarity: "common",
-							isFoil: false,
-						});
-					// 3 uncommons
-					for (let i = 0; i < 3; i++)
-						slots.push({
-							type: "uncommon",
-							label: "Uncommon",
-							rarity: "uncommon",
-							isFoil: false,
-						});
-					// 1 guaranteed rare/mythic
-					slots.push({
-						type: "rare",
-						label: "Rare",
-						rarity: "rare",
-						isFoil: false,
-					});
-					// 1 wildcard (any rarity)
-					slots.push({
-						type: "wildcard",
-						label: "🃏 Wild",
-						rarity: rollWildcardRarity(),
-						isFoil: false,
-					});
-					// 1 list / C-U slot (12.5% list, 87.5% common/uncommon)
-					// We always draw from common here; the caller handles the list chance
-					slots.push({
-						type: "list",
-						label: "📋 List",
-						rarity: "common",
-						isFoil: false,
-						mayBeList: true,
-					});
-					// 1 guaranteed foil (any rarity)
-					slots.push({
-						type: "foil",
-						label: "✨ Foil",
-						rarity: rollFoilRarity(),
-						isFoil: true,
-					});
-					// 1 basic land
-					slots.push({
-						type: "land",
-						label: "Land",
-						rarity: "land",
-						isFoil: false,
-					});
-				} else if (profile.format === "masters") {
-					// Masters — 10 commons, 3 uncommons, 1 rare, 1 foil (dedicated last slot)
-					for (let i = 0; i < 10; i++)
-						slots.push({
-							type: "common",
-							label: "Common",
-							rarity: "common",
-							isFoil: false,
-						});
-					for (let i = 0; i < 3; i++)
-						slots.push({
-							type: "uncommon",
-							label: "Uncommon",
-							rarity: "uncommon",
-							isFoil: false,
-						});
-					slots.push({
-						type: "rare",
-						label: "Rare",
-						rarity: "rare",
-						isFoil: false,
-					});
-					slots.push({
-						type: "foil",
-						label: "✨ Foil",
-						rarity: rollFoilRarity(),
-						isFoil: true,
-					});
-				} else {
-					// Draft / Pre-foil — 10 commons (or 9+foil), 3 uncommons, 1 rare, 1 land
-					if (hasFoil && profile.foilReplacesCommon) {
-						// Foil replaces the 10th common — 9 regular commons + 1 foil slot
-						for (let i = 0; i < 9; i++)
-							slots.push({
-								type: "common",
-								label: "Common",
-								rarity: "common",
-								isFoil: false,
-							});
-						slots.push({
-							type: "foil",
-							label: "✨ Foil",
-							rarity: rollFoilRarity(),
-							isFoil: true,
-						});
-					} else {
-						// No foil: 10 standard commons
-						for (let i = 0; i < 10; i++)
-							slots.push({
-								type: "common",
-								label: "Common",
-								rarity: "common",
-								isFoil: false,
-							});
-					}
-					for (let i = 0; i < 3; i++)
-						slots.push({
-							type: "uncommon",
-							label: "Uncommon",
-							rarity: "uncommon",
-							isFoil: false,
-						});
-					slots.push({
-						type: "rare",
-						label: "Rare",
-						rarity: "rare",
-						isFoil: false,
-					});
-					slots.push({
-						type: "land",
-						label: "Land",
-						rarity: "land",
-						isFoil: false,
-					});
-				}
-
-				return slots;
-			}
-
-			// ── generatePackProgressive ──────────���────────────────────────────────────
+			// ── Progressive card fetching ─────────────────────────────────────────────
 			async function generatePackProgressive(setCode, generation) {
 				updateProgress("Starting pack generation...");
-
 				const usedCardIds = new Set();
-				const { profile, hasFoil } = generation;
-				const slots = buildSlotManifest(profile, hasFoil);
-				// Keep packSize in sync with actual slot count
-				packSize = slots.length;
+				const { slots } = generation;
 
 				for (let i = 0; i < slots.length; i++) {
 					if (generation.cancelled) return;
@@ -834,48 +788,18 @@
 					);
 
 					try {
-						// Determine what rarity to request from the API
-						let apiRarity = slot.rarity;
-
-						// List slot: 12.5% chance to fetch from The List (plist),
-						// otherwise treat as a common/uncommon from the set.
-						if (slot.mayBeList && Math.random() < 0.125) {
-							// Fetch from plist set — fall back to common on error
-							try {
-								const card = await fetchSingleCard("plist", "any", usedCardIds);
-								if (!generation.cancelled && card) {
-									displayCard(card, i, false, "list");
-									usedCardIds.add(card.id);
-									generation.cardCount++;
-								}
-								continue;
-							} catch (listErr) {
-								console.log(
-									"[booster] plist fetch failed, falling back to common:",
-									listErr.message,
-								);
-								apiRarity = "common";
-							}
-						}
-
-						const card = await fetchSingleCard(setCode, apiRarity, usedCardIds);
-
+						const card = await fetchSingleCard(
+							slot.setCode,
+							slot.apiRarity,
+							usedCardIds,
+						);
 						if (!generation.cancelled && card) {
-							displayCard(
-								card,
-								i,
-								slot.isFoil,
-								slot.type === "land"
-									? "land"
-									: slot.type === "list"
-										? "list"
-										: null,
-							);
+							displayCard(card, i, slot.isFoil, slot.type);
 							usedCardIds.add(card.id);
 							generation.cardCount++;
 						}
 					} catch (error) {
-						// Land slot with no lands — replace with extra common
+						// Land slot with no basic lands → replace with an extra common
 						if (slot.type === "land") {
 							console.log(
 								"No common lands in this set, replacing land slot with common",
@@ -887,14 +811,14 @@
 									usedCardIds,
 								);
 								if (!generation.cancelled && card) {
-									displayCard(card, i);
+									displayCard(card, i, false, "common");
 									usedCardIds.add(card.id);
 									generation.cardCount++;
 								}
-							} catch (fallbackError) {
+							} catch (fb) {
 								console.error(
 									"Failed to fetch fallback common for land slot:",
-									fallbackError,
+									fb,
 								);
 							}
 						} else {
@@ -917,13 +841,10 @@
 				}
 			}
 
+			// ── Single-card fetch (with retry for common-land re-rolls) ───────────────
 			async function fetchSingleCard(setCode, rarity, usedCardIds = new Set()) {
-				let attempts = 0;
 				const maxAttempts = 20;
-
-				while (attempts < maxAttempts) {
-					attempts++;
-
+				for (let attempts = 0; attempts < maxAttempts; attempts++) {
 					const response = await fetch("/api/booster/single", {
 						method: "POST",
 						headers: { "Content-Type": "application/json" },
@@ -934,24 +855,20 @@
 						}),
 					});
 
-					// 404 means none of this type exist in the set — no point retrying
 					if (response.status === 404) {
 						const data = await response.json();
 						throw new Error(data.error || `No ${rarity} cards available`);
 					}
 
 					const data = await response.json();
-
-					if (data.error) {
-						throw new Error(data.error);
-					}
+					if (data.error) throw new Error(data.error);
 
 					const card = data.card;
 
-					// If it's a common slot and we got a land, re-roll
+					// Re-roll if a common slot accidentally returned a basic land
 					if (rarity === "common" && card.is_common_land) {
 						console.log(
-							`Re-rolling common land: ${card.name} (attempt ${attempts})`,
+							`Re-rolling common land: ${card.name} (attempt ${attempts + 1})`,
 						);
 						usedCardIds.add(card.id);
 						continue;
@@ -965,7 +882,18 @@
 				);
 			}
 
-			function displayCard(card, slotIndex, isFoil = false, slotType = null) {
+			// ── Card display ──────────────────────────────────────────────────────────
+			/**
+			 * Renders a card into the given slot.
+			 * slotType is the final resolved type: "common"|"uncommon"|"rare"|"foil"|"list"|"land"
+			 * The badge icon and colour are driven entirely by what actually happened.
+			 */
+			function displayCard(
+				card,
+				slotIndex,
+				isFoil = false,
+				slotType = "common",
+			) {
 				const cardSlot = document.getElementById(`card-slot-${slotIndex}`);
 				if (!cardSlot) return;
 
@@ -980,18 +908,22 @@
 				img.alt = "Card back";
 				img.title = "Click to reveal";
 
+				// Badge: determined by ACTUAL slot type and foil status — not a prediction
 				const rarityBadge = document.createElement("div");
 				let badgeClass, badgeText;
 				if (isFoil) {
+					// Foil slot: show ✨ with the card's actual rarity colour
 					badgeClass = card.rarity;
 					badgeText = "✨";
 				} else if (slotType === "land") {
 					badgeClass = "land";
 					badgeText = "L";
 				} else if (slotType === "list") {
+					// Only shown here when the list roll actually hit
 					badgeClass = "list";
 					badgeText = "📋";
 				} else {
+					// Common, uncommon, rare, mythic — use the card's own rarity
 					badgeClass = card.rarity;
 					badgeText = card.rarity[0].toUpperCase();
 				}
@@ -999,6 +931,7 @@
 				rarityBadge.textContent = badgeText;
 				rarityBadge.style.display = "none";
 
+				// Send-to-player overlay
 				const sendOverlay = document.createElement("div");
 				sendOverlay.className = "send-overlay";
 				[1, 2, 3, 4].forEach((p) => {
@@ -1037,14 +970,10 @@
 
 				let faceIndex = -1;
 				cardSlot.dataset.faceIndex = "-1";
-
-				img.onload = () => {
-					img.classList.add("loaded");
-				};
+				img.onload = () => img.classList.add("loaded");
 
 				function flipTo(nextIndex) {
 					const nextSrc = nextIndex === -1 ? "/cardback.jpg" : faces[nextIndex];
-
 					animatedCardFlip(img, nextSrc, () => {
 						if (nextIndex === -1) {
 							img.alt = "Card back";
@@ -1071,26 +1000,19 @@
 					});
 				}
 
-				let expandTimeout = null;
-
+				// Hover / tap expand
 				cardSlot.addEventListener("pointerenter", (e) => {
-					if (e.pointerType === "mouse") {
-						cardSlot.classList.add("expanded");
-					}
+					if (e.pointerType === "mouse") cardSlot.classList.add("expanded");
 				});
-
 				cardSlot.addEventListener("pointerleave", (e) => {
-					if (e.pointerType === "mouse") {
-						cardSlot.classList.remove("expanded");
-					}
+					if (e.pointerType === "mouse") cardSlot.classList.remove("expanded");
 				});
-
 				cardSlot.addEventListener("pointerdown", (e) => {
 					if (e.pointerType !== "mouse") {
 						const wasExpanded = cardSlot.classList.contains("expanded");
-						document.querySelectorAll(".card-slot.expanded").forEach((el) => {
-							el.classList.remove("expanded");
-						});
+						document
+							.querySelectorAll(".card-slot.expanded")
+							.forEach((el) => el.classList.remove("expanded"));
 						if (!wasExpanded) {
 							cardSlot.classList.add("expanded");
 							e.stopPropagation();
@@ -1103,23 +1025,17 @@
 						img.classList.contains("flipping-in")
 					)
 						return;
-
-					if (faceIndex === -1) {
-						flipTo(0);
-					} else if (isDFC) {
-						flipTo(faceIndex === 0 ? 1 : 0);
-					} else {
-						flipTo(faceIndex === 0 ? -1 : 0);
-					}
+					if (faceIndex === -1) flipTo(0);
+					else if (isDFC) flipTo(faceIndex === 0 ? 1 : 0);
+					else flipTo(faceIndex === 0 ? -1 : 0);
 				});
 			}
 
 			document.addEventListener("pointerdown", (e) => {
-				if (!e.target.closest(".card-slot")) {
-					document.querySelectorAll(".card-slot.expanded").forEach((el) => {
-						el.classList.remove("expanded");
-					});
-				}
+				if (!e.target.closest(".card-slot"))
+					document
+						.querySelectorAll(".card-slot.expanded")
+						.forEach((el) => el.classList.remove("expanded"));
 			});
 
 			function updateProgress(message) {
@@ -1146,7 +1062,6 @@
 				document.getElementById("error").style.display = "none";
 			}
 
-			// Load sets when page loads
 			loadSets();
 		</script>
 	</body>
