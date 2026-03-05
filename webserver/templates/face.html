@@ -347,14 +347,6 @@
             applyFoil(data.premium || null, isDFC);
             renderCounter(currentFaceTypeLine());
           }
-
-          const key = `${cardId || "noid"}:${faceIndex}:${faces[faceIndex]?.image_url || ""}`;
-          if (key !== lastRenderedKey) {
-            lastRenderedKey = key;
-            showCurrentFace();
-          } else {
-            renderCounter(currentFaceTypeLine());
-          }
         } catch {
           // keep last state
         }
