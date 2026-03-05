@@ -267,6 +267,19 @@ def api_send_player(player: int):
     except Exception as e:
         return jsonify({"error": str(e)}), 502
 
+@app.patch("/api/premium/<int:player>")
+def api_premium_player(player: int):
+    """Set or clear the premium (foil) tag for a player's current card, without re-fetching from Scryfall."""
+    _require_player(player)
+    payload = request.get_json(silent=True) or {}
+    premium = payload.get("premium") or None  # "foil" | null
+
+    with _state_lock:
+        if not _state_by_player[player]["card_id"]:
+            return jsonify({"error": "No card set for this player"}), 409
+        _state_by_player[player]["premium"] = premium
+
+    return jsonify({"ok": True, "player": player, "premium": premium})
 
 @app.post("/api/search/<int:player>")
 def api_search_player(player: int):
