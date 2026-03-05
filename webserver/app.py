@@ -45,7 +45,8 @@ EXCLUDED_SET_CODES = {
     "phtr",
     "punk",
     "klr",
-    "h2r"
+    "h2r",
+    "sis"
 }
 
 # Wire path/URL constants into submodules
