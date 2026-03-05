@@ -262,7 +262,8 @@
 		<script src="/static/card-flip.js"></script>
 		<script>
 			const BASE_URL = "http://{{ LOCAL_IP }}{{ DEV_PORT }}";
-			const PREMIUM_CHANCE = 0.5; // 50% chance of premium foil slot replacing 10th common
+			const PREMIUM_CHANCE = 0.9; // 50% chance of premium foil slot replacing 10th common
+			const FOIL_DEBUT = new Date("1999-02-15");
 
 			let allSets = [];
 			let currentGeneration = null;
@@ -428,10 +429,13 @@
 					currentGeneration.cancelled = true;
 				}
 
-				// Roll for premium before anything starts
-				const isPremium = rollPremium() === "premium";
-				currentGeneration = { cancelled: false, cardCount: 0, isPremium };
+				// Only sets from Urza's Legacy (1999-02-15) onwards can have foils
+				const selectedSet = allSets.find((s) => s.code === setCode);
+				const setDate = selectedSet ? new Date(selectedSet.released_at) : null;
+				const canHaveFoils = setDate && setDate >= FOIL_DEBUT;
 
+				const isPremium = canHaveFoils && rollPremium() === "premium";
+				currentGeneration = { cancelled: false, cardCount: 0, isPremium };
 				showLoading(true);
 				hideError();
 				setupPackGrid(isPremium);
@@ -551,7 +555,7 @@
 					try {
 						const card = await fetchSingleCard(setCode, "land", usedCardIds);
 						if (!generation.cancelled && card) {
-							displayCard(card, commonCount + 4);
+							displayCard(card, commonCount + 4, false, "land");
 							usedCardIds.add(card.id);
 							generation.cardCount++;
 						}
@@ -654,7 +658,7 @@
 				);
 			}
 
-			function displayCard(card, slotIndex, isFoil = false) {
+			function displayCard(card, slotIndex, isFoil = false, slotType = null) {
 				const cardSlot = document.getElementById(`card-slot-${slotIndex}`);
 				if (!cardSlot) return;
 
@@ -666,21 +670,26 @@
 				const isDFC = !!card.back_image_url;
 
 				const img = document.createElement("img");
-				img.src = "/cardback.jpg"; // always start face-down
+				img.src = "/cardback.jpg";
 				img.alt = "Card back";
 				img.title = "Click to reveal";
 
 				const rarityBadge = document.createElement("div");
-				const displayRarity =
-					card.type_line && card.type_line.includes("Land")
-						? "land"
-						: card.rarity;
-				rarityBadge.className = `card-rarity rarity-${displayRarity}`;
-				rarityBadge.textContent = isFoil
-					? "✨"
-					: displayRarity === "land"
-						? "L"
-						: card.rarity[0].toUpperCase();
+				// slotType drives the badge — "land" slot always shows L, "premium" shows ✨,
+				// everything else (including land cards in a common slot) uses actual rarity
+				let badgeClass, badgeText;
+				if (isFoil) {
+					badgeClass = card.rarity;
+					badgeText = "✨";
+				} else if (slotType === "land") {
+					badgeClass = "land";
+					badgeText = "L";
+				} else {
+					badgeClass = card.rarity;
+					badgeText = card.rarity[0].toUpperCase();
+				}
+				rarityBadge.className = `card-rarity rarity-${badgeClass}`;
+				rarityBadge.textContent = badgeText;
 				rarityBadge.style.display = "none";
 
 				const sendOverlay = document.createElement("div");
@@ -703,7 +712,7 @@
 								}),
 							});
 							btn.textContent = r.ok ? "✓" : "✗";
-                            if (r.ok) showSendQr(p);
+							if (r.ok) showSendQr(p);
 						} catch {
 							btn.textContent = "✗";
 						}
