@@ -203,46 +203,49 @@
 		</div>
 		<script src="/static/card-flip.js"></script>
 		<script>
-			const PLAYER = {{ player|int }};
-			const QR_HOST = "raspberrypi.local"; // IMPORTANT: resolves on other devices
-			const BASE_URL = "http://{{ LOCAL_IP }}{{ DEV_PORT }}";
+						const PLAYER = {{ player|int }};
+						const QR_HOST = "raspberrypi.local"; // IMPORTANT: resolves on other devices
+						const BASE_URL = "http://{{ LOCAL_IP }}{{ DEV_PORT }}";
 
 
-			function getRotateOverride() {
-			  const p = new URLSearchParams(window.location.search);
-			  if (!p.has("rotate")) return false;
-			  const v = (p.get("rotate") || "").trim().toLowerCase();
-			  return ["1","true","yes","on"].includes(v);
-			}
-			const rotate = getRotateOverride();
-			if (rotate) document.documentElement.classList.add("rotate");
+						function getRotateOverride() {
+						  const p = new URLSearchParams(window.location.search);
+						  if (!p.has("rotate")) return false;
+						  const v = (p.get("rotate") || "").trim().toLowerCase();
+						  return ["1","true","yes","on"].includes(v);
+						}
+						const rotate = getRotateOverride();
+						if (rotate) document.documentElement.classList.add("rotate");
 
-			function externalBaseUrl() {
-			  return BASE_URL;
-			}
+						function externalBaseUrl() {
+						  return BASE_URL;
+						}
 
-			const cardWrap = document.getElementById("cardWrap");
-			const img = document.getElementById("card");
-			const clickCatcher = document.getElementById("clickCatcher");
+						const cardWrap = document.getElementById("cardWrap");
+						const img = document.getElementById("card");
+						const clickCatcher = document.getElementById("clickCatcher");
 
-			function fitCardWrapToViewport(naturalW, naturalH) {
-			  if (!naturalW || !naturalH) return;
-			  const vw = window.innerWidth, vh = window.innerHeight;
-			  const availW = rotate ? vh : vw;
-			  const availH = rotate ? vw : vh;
-			  const scale = Math.min(availW / naturalW, availH / naturalH);
-			  cardWrap.style.width = Math.floor(naturalW * scale) + "px";
-			  cardWrap.style.height = Math.floor(naturalH * scale) + "px";
-			}
+						function fitCardWrapToViewport(naturalW, naturalH) {
+						  if (!naturalW || !naturalH) return;
+						  const vw = window.innerWidth, vh = window.innerHeight;
+						  const availW = rotate ? vh : vw;
+						  const availH = rotate ? vw : vh;
+						  const scale = Math.min(availW / naturalW, availH / naturalH);
+						  cardWrap.style.width = Math.floor(naturalW * scale) + "px";
+						  cardWrap.style.height = Math.floor(naturalH * scale) + "px";
+						}
 
-			let counter = 0;
+						let counter = 0;
 
-			const minusBtn = document.getElementById("minusBtn");
-			const plusBtn = document.getElementById("plusBtn");
-			const countBtn = document.getElementById("countBtn");
+						const minusBtn = document.getElementById("minusBtn");
+						const plusBtn = document.getElementById("plusBtn");
+						const countBtn = document.getElementById("countBtn");
 
-			function isPlaneswalkerTypeLine(typeLine) {
-			  return typeof typeLine === "string" && typeLine.includes("Planeswalker");
+			function isPlusCounterTypeLine(typeLine) {
+			  return typeof typeLine === "string" && (
+			    typeLine.includes("Creature") ||
+			    typeLine.includes("Vehicle")
+			  );
 			}
 
 			function renderCounter(currentFaceTypeLine) {
@@ -255,210 +258,212 @@
 			  countBtn.hidden = false;
 			  countBtn.setAttribute("aria-hidden", "false");
 
-			  if (isPlaneswalkerTypeLine(currentFaceTypeLine)) {
-			    countBtn.textContent = String(counter);
-			    return;
-			  }
-			  if (counter > 0) countBtn.textContent = `+${counter}/+${counter}`;
-			  else countBtn.textContent = `${counter}/${counter}`;
-			}
-
-			function dec() { counter -= 1; renderCounter(currentFaceTypeLine()); }
-			function inc() { counter += 1; renderCounter(currentFaceTypeLine()); }
-
-			function wireButton(el, fn) {
-			  el.addEventListener("click", fn);
-			  el.addEventListener("keydown", (e) => {
-			    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); }
-			  });
-			}
-			wireButton(minusBtn, dec);
-			wireButton(plusBtn, inc);
-
-			let lastCardId = null;
-			let faces = [];
-			let faceIndex = 0;
-			let currentPremium = null;  // "foil" | null
-			let currentIsDFC = false;
-
-			function cacheBust(url) {
-			  if (!url) return url;
-			  try {
-			    const u = new URL(url, location.origin);
-			    u.searchParams.set("_t", Date.now().toString());
-			    return u.toString();
-			  } catch {
-			    const joiner = url.includes("?") ? "&" : "?";
-			    return url + joiner + "_t=" + Date.now().toString();
-			  }
-			}
-
-			function currentFaceTypeLine() {
-			  const f = faces && faces[faceIndex];
-			  return f ? f.type_line : "";
-			}
-
-			function showCurrentFace(animate = false) {
-			  const f = faces && faces[faceIndex];
-			  if (!f || !f.image_url) return;
-			  animatedCardFlip(img, cacheBust(f.image_url), () => {
-			      // At scaleX(0) midpoint: swap foil state in sync with the image swap
-			      applyFoil(currentPremium, currentIsDFC);
-			      renderCounter(currentFaceTypeLine());
-			  }, !animate || rotate);
-			}
-
-			function applyFoil(premium, isDFC) {
-			  currentPremium = premium;
-			  currentIsDFC = isDFC;
-
-			  // Foil shows on: front face always, back face only for DFC
-			  const showFoil = premium === 'foil' && (faceIndex === 0 || isDFC);
-
-			  // /* Uncomment when ready to test rotate/slow-display support:
-			  // if (showFoil && rotate) {
-			  //   cardWrap.classList.remove('foil');
-			  //   cardWrap.classList.add('foil-static');
-			  // } else if (showFoil) {
-			  //   cardWrap.classList.remove('foil-static');
-			  //   cardWrap.classList.add('foil');
-			  // } else {
-			  //   cardWrap.classList.remove('foil', 'foil-static');
-			  // }
-			  // */
-
-			  if (showFoil) {
-			    cardWrap.classList.add('foil');
+			  if (isPlusCounterTypeLine(currentFaceTypeLine)) {
+			    // Creatures and Vehicles: show as +1/+1 counters
+			    if (counter > 0) countBtn.textContent = `+${counter}/+${counter}`;
+			    else countBtn.textContent = `${counter}/${counter}`;
 			  } else {
-			    cardWrap.classList.remove('foil');
+			    // Planeswalkers, enchantments, artifacts, etc: generic numeric counter
+			    countBtn.textContent = String(counter);
 			  }
 			}
 
-			clickCatcher.addEventListener("click", () => {
-			  if (!faces || faces.length < 2) return;
-			  faceIndex = (faceIndex + 1) % 2;
-			  showCurrentFace(true);   // animate on manual tap — applyFoil fires mid-flip via onSwap
-			});
+						function dec() { counter -= 1; renderCounter(currentFaceTypeLine()); }
+						function inc() { counter += 1; renderCounter(currentFaceTypeLine()); }
 
-			async function loadQrLib() {
-			  const src = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
-			  await new Promise((resolve, reject) => {
-			    const s = document.createElement("script");
-			    s.src = src;
-			    s.onload = resolve;
-			    s.onerror = () => reject(new Error("Failed to load QR library"));
-			    document.head.appendChild(s);
-			  });
-			}
+						function wireButton(el, fn) {
+						  el.addEventListener("click", fn);
+						  el.addEventListener("keydown", (e) => {
+						    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); }
+						  });
+						}
+						wireButton(minusBtn, dec);
+						wireButton(plusBtn, inc);
 
-			function drawQrToCanvas(text, canvas) {
-			  const qr = window.qrcode(0, "M");
-			  qr.addData(text);
-			  qr.make();
+						let lastCardId = null;
+						let faces = [];
+						let faceIndex = 0;
+						let currentPremium = null;  // "foil" | null
+						let currentIsDFC = false;
 
-			  const ctx = canvas.getContext("2d");
-			  const count = qr.getModuleCount();
-			  const size = canvas.width;
-			  const scale = Math.floor(size / count);
-			  const offset = Math.floor((size - count * scale) / 2);
+						function cacheBust(url) {
+						  if (!url) return url;
+						  try {
+						    const u = new URL(url, location.origin);
+						    u.searchParams.set("_t", Date.now().toString());
+						    return u.toString();
+						  } catch {
+						    const joiner = url.includes("?") ? "&" : "?";
+						    return url + joiner + "_t=" + Date.now().toString();
+						  }
+						}
 
-			  ctx.fillStyle = "#fff";
-			  ctx.fillRect(0, 0, size, size);
+						function currentFaceTypeLine() {
+						  const f = faces && faces[faceIndex];
+						  return f ? f.type_line : "";
+						}
 
-			  ctx.fillStyle = "#000";
-			  for (let r = 0; r < count; r++) {
-			    for (let c = 0; c < count; c++) {
-			      if (qr.isDark(r, c)) {
-			        ctx.fillRect(offset + c * scale, offset + r * scale, scale, scale);
-			      }
-			    }
-			  }
-			}
+						function showCurrentFace(animate = false) {
+						  const f = faces && faces[faceIndex];
+						  if (!f || !f.image_url) return;
+						  animatedCardFlip(img, cacheBust(f.image_url), () => {
+						      // At scaleX(0) midpoint: swap foil state in sync with the image swap
+						      applyFoil(currentPremium, currentIsDFC);
+						      renderCounter(currentFaceTypeLine());
+						  }, !animate || rotate);
+						}
 
-			let qrLoaded = false;
-			async function showQr() {
-			  const wrap = document.getElementById("qrWrap");
-			  const canvas = document.getElementById("qr");
-			  const label = document.getElementById("qrLabel");
+						function applyFoil(premium, isDFC) {
+						  currentPremium = premium;
+						  currentIsDFC = isDFC;
 
-			  const url = `${externalBaseUrl()}/config`;
-			  label.textContent = url;
+						  // Foil shows on: front face always, back face only for DFC
+						  const showFoil = premium === 'foil' && (faceIndex === 0 || isDFC);
 
-			  try {
-			    if (!qrLoaded) {
-			      await loadQrLib();
-			      qrLoaded = true;
-			    }
-			    drawQrToCanvas(url, canvas);
-			    canvas.style.display = "block";
-			  } catch {
-			    canvas.style.display = "none";
-			  }
+						  // /* Uncomment when ready to test rotate/slow-display support:
+						  // if (showFoil && rotate) {
+						  //   cardWrap.classList.remove('foil');
+						  //   cardWrap.classList.add('foil-static');
+						  // } else if (showFoil) {
+						  //   cardWrap.classList.remove('foil-static');
+						  //   cardWrap.classList.add('foil');
+						  // } else {
+						  //   cardWrap.classList.remove('foil', 'foil-static');
+						  // }
+						  // */
 
-			  wrap.hidden = false;
-			}
+						  if (showFoil) {
+						    cardWrap.classList.add('foil');
+						  } else {
+						    cardWrap.classList.remove('foil');
+						  }
+						}
 
-			function hideQr() {
-			  document.getElementById("qrWrap").hidden = true;
-			}
+						clickCatcher.addEventListener("click", () => {
+						  if (!faces || faces.length < 2) return;
+						  faceIndex = (faceIndex + 1) % 2;
+						  showCurrentFace(true);   // animate on manual tap — applyFoil fires mid-flip via onSwap
+						});
 
-			let lastRenderedKey = null;
+						async function loadQrLib() {
+						  const src = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
+						  await new Promise((resolve, reject) => {
+						    const s = document.createElement("script");
+						    s.src = src;
+						    s.onload = resolve;
+						    s.onerror = () => reject(new Error("Failed to load QR library"));
+						    document.head.appendChild(s);
+						  });
+						}
 
-			async function poll() {
-			  try {
-			    const r = await fetch(`/api/current/${PLAYER}`, { cache: "no-store" });
-			    const data = await r.json();
+						function drawQrToCanvas(text, canvas) {
+						  const qr = window.qrcode(0, "M");
+						  qr.addData(text);
+						  qr.make();
 
-			    const cardId = data.card_id || null;
-			    const nextFaces = Array.isArray(data.faces) ? data.faces : [];
-			    // A face is valid if it has any image_url (including local /cardback.jpg)
-			    const hasCard = nextFaces.length > 0 && nextFaces[0] && nextFaces[0].image_url;
+						  const ctx = canvas.getContext("2d");
+						  const count = qr.getModuleCount();
+						  const size = canvas.width;
+						  const scale = Math.floor(size / count);
+						  const offset = Math.floor((size - count * scale) / 2);
 
-			    if (!hasCard) {
-			      if (lastRenderedKey !== "") {
-			        lastRenderedKey = "";
-			        img.removeAttribute("src");
-			      }
-			      showQr();
-			      return;
-			    }
+						  ctx.fillStyle = "#fff";
+						  ctx.fillRect(0, 0, size, size);
 
-			    hideQr();
+						  ctx.fillStyle = "#000";
+						  for (let r = 0; r < count; r++) {
+						    for (let c = 0; c < count; c++) {
+						      if (qr.isDark(r, c)) {
+						        ctx.fillRect(offset + c * scale, offset + r * scale, scale, scale);
+						      }
+						    }
+						  }
+						}
 
-			    if (cardId && cardId !== lastCardId) {
-			      lastCardId = cardId;
-			      faceIndex = 0;
-			    }
+						let qrLoaded = false;
+						async function showQr() {
+						  const wrap = document.getElementById("qrWrap");
+						  const canvas = document.getElementById("qr");
+						  const label = document.getElementById("qrLabel");
 
-			    faces = nextFaces;
-			    faceIndex = Math.min(faceIndex, Math.max(0, faces.length - 1));
+						  const url = `${externalBaseUrl()}/config`;
+						  label.textContent = url;
 
-			    // Determine if this card is dual-faced (face[1] has a real image, not the cardback sentinel)
-			    const isDFC = faces.length >= 2 && faces[1] && faces[1].image_url !== "/cardback.jpg";
+						  try {
+						    if (!qrLoaded) {
+						      await loadQrLib();
+						      qrLoaded = true;
+						    }
+						    drawQrToCanvas(url, canvas);
+						    canvas.style.display = "block";
+						  } catch {
+						    canvas.style.display = "none";
+						  }
 
-			    const key = `${cardId || "noid"}:${faceIndex}:${faces[faceIndex]?.image_url || ""}`;
-			    if (key !== lastRenderedKey) {
-			      lastRenderedKey = key;
-			      // Store latest values so showCurrentFace's onSwap can read them mid-flip
-			      currentPremium = data.premium || null;
-			      currentIsDFC = isDFC;
-			      showCurrentFace();
-			    } else {
-			      // No flip happening — apply foil directly (handles initial load & poll-only updates)
-			      applyFoil(data.premium || null, isDFC);
-			      renderCounter(currentFaceTypeLine());
-			    }
-			  } catch {
-			    // keep last state
-			  }
-			}
+						  wrap.hidden = false;
+						}
 
-			img.addEventListener("load", () => fitCardWrapToViewport(img.naturalWidth, img.naturalHeight));
-			window.addEventListener("resize", () => fitCardWrapToViewport(img.naturalWidth, img.naturalHeight));
+						function hideQr() {
+						  document.getElementById("qrWrap").hidden = true;
+						}
 
-			renderCounter("");
-			poll();
-			setInterval(poll, 1000);
+						let lastRenderedKey = null;
+
+						async function poll() {
+						  try {
+						    const r = await fetch(`/api/current/${PLAYER}`, { cache: "no-store" });
+						    const data = await r.json();
+
+						    const cardId = data.card_id || null;
+						    const nextFaces = Array.isArray(data.faces) ? data.faces : [];
+						    // A face is valid if it has any image_url (including local /cardback.jpg)
+						    const hasCard = nextFaces.length > 0 && nextFaces[0] && nextFaces[0].image_url;
+
+						    if (!hasCard) {
+						      if (lastRenderedKey !== "") {
+						        lastRenderedKey = "";
+						        img.removeAttribute("src");
+						      }
+						      showQr();
+						      return;
+						    }
+
+						    hideQr();
+
+						    if (cardId && cardId !== lastCardId) {
+						      lastCardId = cardId;
+						      faceIndex = 0;
+						    }
+
+						    faces = nextFaces;
+						    faceIndex = Math.min(faceIndex, Math.max(0, faces.length - 1));
+
+						    // Determine if this card is dual-faced (face[1] has a real image, not the cardback sentinel)
+						    const isDFC = faces.length >= 2 && faces[1] && faces[1].image_url !== "/cardback.jpg";
+
+						    const key = `${cardId || "noid"}:${faceIndex}:${faces[faceIndex]?.image_url || ""}`;
+						    if (key !== lastRenderedKey) {
+						      lastRenderedKey = key;
+						      // Store latest values so showCurrentFace's onSwap can read them mid-flip
+						      currentPremium = data.premium || null;
+						      currentIsDFC = isDFC;
+						      showCurrentFace();
+						    } else {
+						      // No flip happening — apply foil directly (handles initial load & poll-only updates)
+						      applyFoil(data.premium || null, isDFC);
+						      renderCounter(currentFaceTypeLine());
+						    }
+						  } catch {
+						    // keep last state
+						  }
+						}
+
+						img.addEventListener("load", () => fitCardWrapToViewport(img.naturalWidth, img.naturalHeight));
+						window.addEventListener("resize", () => fitCardWrapToViewport(img.naturalWidth, img.naturalHeight));
+
+						renderCounter("");
+						poll();
+						setInterval(poll, 1000);
 		</script>
 	</body>
 </html>
