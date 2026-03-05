@@ -8,8 +8,13 @@
  */
 function animatedCardFlip(imgEl, newSrc, onSwap, skip = false) {
     if (skip) {
+        // Wait for the new image to finish loading before calling onSwap,
+        // so foil class changes (add/remove) apply at the same moment the
+        // new image becomes visible — not while the old one is still shown.
+        if (onSwap) {
+            imgEl.addEventListener('load', () => { onSwap(); }, { once: true });
+        }
         imgEl.src = newSrc;
-        if (onSwap) onSwap();
         return;
     }
 
