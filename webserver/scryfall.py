@@ -81,6 +81,7 @@ def _scryfall_get(url: str, use_cache: bool = False, cache_key: str = None, cach
 
 
 # ---- Card image helpers ----
+
 def _pick_image_border_crop_only(iu: dict) -> str:
     if not isinstance(iu, dict):
         return ""
@@ -139,6 +140,7 @@ def _extract_border_crop(card: dict) -> str:
 
 
 # ---- Player state ----
+
 def _require_player(player: int) -> int:
     if player not in _state_by_player:
         raise ValueError("Invalid player. Must be 1..4.")
@@ -195,6 +197,7 @@ def _set_player_state(player: int, *, last_query: str, card: dict, premium: str 
 
 
 # ---- Booster helpers ----
+
 def _get_all_sets() -> list[dict]:
     """Get all Magic sets from Scryfall with 1-day caching."""
     return _scryfall_get(
@@ -394,6 +397,9 @@ _SLOT_LABELS = {
 MTGJSON_SET_URL = "https://mtgjson.com/api/v5/{code}.json"
 MTGJSON_CACHE_HOURS = 24 * 7  # one week — booster configs don't change
 
+# Preferred booster types in order — "play" is the modern replacement for "draft"
+_BOOSTER_TYPE_PREFERENCE = ["draft", "play", "default"]
+
 
 def _classify_sheet(sheet_name: str) -> str:
     """Map a raw MTGJSON sheet name to one of our known slot type strings."""
@@ -404,18 +410,18 @@ def _classify_sheet(sheet_name: str) -> str:
     return "common"  # safe fallback
 
 
-def _foil_probability_from_slot(slot) -> float:
+def _foil_probability_from_slot(slot: dict | list) -> float:
     """
-    Given a raw MTGJSON slot entry (either a string for a fixed sheet,
+    Given a raw MTGJSON slot entry (either a string/dict for a fixed sheet,
     or a list of [sheetName, weight] pairs for a variable slot), return the
-    probability (0.0-1.0) that the slot produces a foil card.
+    probability (0.0–1.0) that the slot produces a foil card.
 
     Examples
     --------
-    "foil"                                 -> 1.0
-    [["foil", 1], ["common", 4]]           -> 0.2
-    [["foil", 1], ["uncommon", 1]]         -> 0.5
-    "common"                               -> 0.0
+    "foil"                                 → 1.0
+    [["foil", 1], ["common", 4]]           → 0.2
+    [["foil", 1], ["uncommon", 1]]         → 0.5
+    "common"                               → 0.0
     """
     if isinstance(slot, str):
         return 1.0 if "foil" in slot.lower() else 0.0
@@ -430,9 +436,32 @@ def _foil_probability_from_slot(slot) -> float:
     return 0.0
 
 
+def _pick_booster_data(booster_section: dict) -> dict | None:
+    """Pick the best booster type from a MTGJSON booster section.
+    Prefers draft → play → default, then any non-collector type, then anything."""
+    for key in _BOOSTER_TYPE_PREFERENCE:
+        if key in booster_section:
+            print(f"[booster_config] Using booster type: '{key}'")
+            return booster_section[key]
+    # Avoid collector boosters if possible — they have weird slot distributions
+    non_collector = {k: v for k, v in booster_section.items() if "collector" not in k.lower()}
+    if non_collector:
+        key = next(iter(non_collector))
+        print(f"[booster_config] Falling back to booster type: '{key}'")
+        return non_collector[key]
+    key = next(iter(booster_section))
+    print(f"[booster_config] Last-resort booster type: '{key}'")
+    return booster_section[key]
+
+
 def _parse_mtgjson_slots(booster_data: dict) -> list[dict]:
-    """Parse a MTGJSON booster config dict (one booster type, e.g. 'default')
+    """
+    Parse a MTGJSON booster config dict (one booster type, e.g. 'play')
     into a flat list of slot descriptors understood by the frontend.
+
+    Handles both schemas:
+      - Modern: boosters[].contents (dict of sheetName→count) + sheets{}
+      - Legacy: slots[] with deck key + sheets{}
 
     Each descriptor:
     {
@@ -443,48 +472,90 @@ def _parse_mtgjson_slots(booster_data: dict) -> list[dict]:
         "label":            str,
     }
     """
-    raw_slots = booster_data.get("slots", [])
     sheets = booster_data.get("sheets", {})
-    result = []
 
-    for raw in raw_slots:
-        deck = raw.get("deck")
-        count = raw.get("count", 1)
+    # --- Modern schema: boosters[].contents + sheets ---
+    boosters_list = booster_data.get("boosters", [])
+    if boosters_list and sheets:
+        # Pick the highest-weight booster variant (most common pack makeup)
+        best = max(boosters_list, key=lambda b: b.get("weight", 0))
+        contents = best.get("contents", {})
+        if not contents:
+            print(f"[booster_config] Modern schema: best booster variant has empty contents")
+            return []
 
-        if deck is None:
-            continue
+        print(f"[booster_config] Modern schema: contents = {dict(contents)}")
 
-        # Variable slot: deck is a list of [sheetName, weight] pairs
-        if isinstance(deck, list):
-            foil_prob = _foil_probability_from_slot(deck)
-            # Classify by the highest-weight non-foil sheet name for label/type
-            non_foil = [(name, w) for name, w in deck if "foil" not in name.lower()]
-            primary = max(non_foil, key=lambda x: x[1])[0] if non_foil else deck[0][0]
-            slot_type = "foil" if foil_prob >= 1.0 else _classify_sheet(primary)
-            is_foil = foil_prob >= 1.0
-        else:
-            # Fixed slot: deck is a sheet name string
-            sheet_meta = sheets.get(deck, {})
-            is_foil = bool(sheet_meta.get("foil", False)) or "foil" in deck.lower()
-            foil_prob = 1.0 if is_foil else 0.0
-            slot_type = _classify_sheet(deck)
+        # Aggregate counts per (slot_type, is_foil) key, then emit descriptors.
+        # Multiple sheet names can map to the same slot type — merge their counts.
+        slot_totals: dict[tuple[str, bool], dict] = {}
 
-        descriptor: dict = {
-            "type":  slot_type,
-            "count": count,
-            "foil":  is_foil,
-            "label": _SLOT_LABELS.get(slot_type, slot_type.capitalize()),
-        }
-        if foil_prob > 0.0:
-            descriptor["foil_probability"] = round(foil_prob, 4)
+        for sheet_name, count in contents.items():
+            sheet_meta = sheets.get(sheet_name, {})
+            is_foil = bool(sheet_meta.get("foil", False))
+            slot_type = "foil" if is_foil else _classify_sheet(sheet_name)
 
-        result.append(descriptor)
+            key = (slot_type, is_foil)
+            if key not in slot_totals:
+                slot_totals[key] = {
+                    "type":  slot_type,
+                    "count": 0,
+                    "foil":  is_foil,
+                    "label": _SLOT_LABELS.get(slot_type, slot_type.capitalize()),
+                }
+            slot_totals[key]["count"] += count
 
-    return result
+        result = list(slot_totals.values())
+        print(f"[booster_config] Modern schema: parsed {len(result)} slot types")
+        return result
+
+    # --- Legacy schema: slots[] list ---
+    raw_slots = booster_data.get("slots", [])
+    if raw_slots:
+        result = []
+        for raw in raw_slots:
+            deck = raw.get("deck")
+            count = raw.get("count", 1)
+
+            if deck is None:
+                continue
+
+            # Variable slot: deck is a list of [sheetName, weight] pairs
+            if isinstance(deck, list):
+                foil_prob = _foil_probability_from_slot(deck)
+                # Classify by the highest-weight non-foil sheet name for label/type
+                non_foil = [(name, w) for name, w in deck if "foil" not in name.lower()]
+                primary = max(non_foil, key=lambda x: x[1])[0] if non_foil else deck[0][0]
+                slot_type = "foil" if foil_prob >= 1.0 else _classify_sheet(primary)
+                is_foil = foil_prob >= 1.0
+            else:
+                # Fixed slot: deck is a sheet name string
+                sheet_meta = sheets.get(deck, {})
+                is_foil = bool(sheet_meta.get("foil", False)) or "foil" in deck.lower()
+                foil_prob = 1.0 if is_foil else 0.0
+                slot_type = _classify_sheet(deck)
+
+            descriptor: dict = {
+                "type":  slot_type,
+                "count": count,
+                "foil":  is_foil,
+                "label": _SLOT_LABELS.get(slot_type, slot_type.capitalize()),
+            }
+            if foil_prob > 0.0:
+                descriptor["foil_probability"] = round(foil_prob, 4)
+
+            result.append(descriptor)
+
+        print(f"[booster_config] Legacy schema: parsed {len(result)} slot types")
+        return result
+
+    print(f"[booster_config] No usable slots found (neither modern nor legacy schema matched)")
+    return []
 
 
 def _get_booster_config(set_code: str) -> dict:
-    """Fetch, parse, and cache the MTGJSON booster config for *set_code*.
+    """
+    Fetch, parse, and cache the MTGJSON booster config for *set_code*.
 
     Returns:
         {
@@ -513,40 +584,24 @@ def _get_booster_config(set_code: str) -> dict:
         with urllib.request.urlopen(req, timeout=10) as resp:
             raw = _json.loads(resp.read().decode())
 
-        # --- DEBUG LOGGING ---
-        data_keys = list(raw.get("data", {}).keys())
-        print(f"[booster_config] MTGJSON top-level data keys for {set_code}: {data_keys}")
-
         booster_section = raw.get("data", {}).get("booster", {})
-        print(f"[booster_config] booster section keys: {list(booster_section.keys())}")
+        print(f"[booster_config] Available booster types for {set_code}: {list(booster_section.keys())}")
 
-        booster_data = (
-            booster_section.get("draft")
-            or booster_section.get("default")
-            or next(iter(booster_section.values()), None)
-        )
+        if not booster_section:
+            print(f"[booster_config] No booster section in MTGJSON for {set_code}, using fallback")
+        else:
+            booster_data = _pick_booster_data(booster_section)
 
-        print(f"[booster_config] booster_data is None: {booster_data is None}")
-        if booster_data:
-            print(f"[booster_config] booster_data keys: {list(booster_data.keys())}")
-            raw_slots = booster_data.get("slots", [])
-            sheets = booster_data.get("sheets", {})
-            print(f"[booster_config] raw_slots count: {len(raw_slots)}")
-            print(f"[booster_config] sheets keys: {list(sheets.keys())}")
-            for i, slot in enumerate(raw_slots[:5]):  # first 5 slots
-                print(f"[booster_config]   slot[{i}]: {slot}")
-        # --- END DEBUG LOGGING ---
+            if booster_data:
+                slots = _parse_mtgjson_slots(booster_data)
+                if slots:
+                    result = {"slots": slots, "source": "mtgjson"}
+                    with _cache_lock:
+                        _set_cached_data(cache_key, result)
+                    print(f"[booster_config] Parsed {len(slots)} slot types for {set_code} from MTGJSON")
+                    return result
 
-        if booster_data:
-            slots = _parse_mtgjson_slots(booster_data)
-            if slots:
-                result = {"slots": slots, "source": "mtgjson"}
-                with _cache_lock:
-                    _set_cached_data(cache_key, result)
-                print(f"[booster_config] Parsed {len(slots)} slot types for {set_code} from MTGJSON")
-                return result
-
-        print(f"[booster_config] No usable booster data in MTGJSON for {set_code}, using fallback")
+            print(f"[booster_config] No usable booster data in MTGJSON for {set_code}, using fallback")
 
     except Exception as e:
         print(f"[booster_config] MTGJSON fetch failed for {set_code}: {e} — using fallback")
