@@ -157,36 +157,13 @@
             font-size: 12px;
             color: #ccc;
         }
-        /* Foil overlay for premium slot */
-        .card-slot.foil::after {
-            content: '';
-            position: absolute;
-            inset: 0;
-            border-radius: 10px;
-            background: linear-gradient(
-                135deg,
-                rgba(255,0,0,0.45) 0%,
-                rgba(255,165,0,0.45) 20%,
-                rgba(255,255,0,0.45) 40%,
-                rgba(0,255,0,0.45) 60%,
-                rgba(0,0,255,0.45) 80%,
-                rgba(148,0,211,0.45) 100%
-            );
-            background-size: 200% 200%;
-            pointer-events: none;
-            animation: foilShimmer 4s linear infinite;
-        }
-        @keyframes foilShimmer {
-            0%   { opacity: 0.5; background-position: 0% 50%; }
-            50%  { opacity: 1.0; background-position: 100% 50%; }
-            100% { opacity: 0.5; background-position: 0% 50%; }
-        }
     </style>
     <link rel="stylesheet" href="/static/card-flip.css">
+    <link rel="stylesheet" href="/static/premium-effects.css">
 </head>
 <body>
     <div class="container">
-        <h1>Booster Pack Simulator</h1>
+        <h1>Booster Tutor</h1>
         
         <div class="controls">
             <div>
@@ -555,14 +532,14 @@
                 btn.textContent = `P${p}`;
                 btn.title = `Send to Player ${p}`;
                 btn.addEventListener('click', async (e) => {
-                    e.stopPropagation(); // don't trigger card flip
+                    e.stopPropagation();
                     btn.disabled = true;
                     btn.textContent = '...';
                     try {
-                        const r = await fetch(`/api/search/${p}`, {
+                        const r = await fetch(`/api/send/${p}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ q: card.name })
+                            body: JSON.stringify({ q: card.name, premium: isFoil ? 'foil' : null })
                         });
                         btn.textContent = r.ok ? '✓' : '✗';
                     } catch {
