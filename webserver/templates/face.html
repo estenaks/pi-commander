@@ -177,6 +177,8 @@
       let lastCardId = null;
       let faces = [];
       let faceIndex = 0;
+      let currentPremium = null;  // "foil" | null
+      let currentIsDFC = false;
 
       function cacheBust(url) {
         if (!url) return url;
@@ -199,14 +201,42 @@
         const f = faces && faces[faceIndex];
         if (!f || !f.image_url) return;
         animatedCardFlip(img, cacheBust(f.image_url), () => {
+            // At scaleX(0) midpoint: swap foil state in sync with the image swap
+            applyFoil(currentPremium, currentIsDFC);
             renderCounter(currentFaceTypeLine());
         }, !animate || rotate);
+      }
+
+      function applyFoil(premium, isDFC) {
+        currentPremium = premium;
+        currentIsDFC = isDFC;
+
+        // Foil shows on: front face always, back face only for DFC
+        const showFoil = premium === 'foil' && (faceIndex === 0 || isDFC);
+
+        // /* Uncomment when ready to test rotate/slow-display support:
+        // if (showFoil && rotate) {
+        //   cardWrap.classList.remove('foil');
+        //   cardWrap.classList.add('foil-static');
+        // } else if (showFoil) {
+        //   cardWrap.classList.remove('foil-static');
+        //   cardWrap.classList.add('foil');
+        // } else {
+        //   cardWrap.classList.remove('foil', 'foil-static');
+        // }
+        // */
+
+        if (showFoil) {
+          cardWrap.classList.add('foil');
+        } else {
+          cardWrap.classList.remove('foil');
+        }
       }
 
       clickCatcher.addEventListener("click", () => {
         if (!faces || faces.length < 2) return;
         faceIndex = (faceIndex + 1) % 2;
-        showCurrentFace(true);   // animate on manual tap
+        showCurrentFace(true);   // animate on manual tap — applyFoil fires mid-flip via onSwap
       });
 
       async function loadQrLib() {
@@ -305,8 +335,18 @@
           // Determine if this card is dual-faced (face[1] has a real image, not the cardback sentinel)
           const isDFC = faces.length >= 2 && faces[1] && faces[1].image_url !== "/cardback.jpg";
 
-          // Apply/remove foil on every poll — also called after faceIndex changes via click
-          applyFoil(data.premium || null, isDFC);
+          const key = `${cardId || "noid"}:${faceIndex}:${faces[faceIndex]?.image_url || ""}`;
+          if (key !== lastRenderedKey) {
+            lastRenderedKey = key;
+            // Store latest values so showCurrentFace's onSwap can read them mid-flip
+            currentPremium = data.premium || null;
+            currentIsDFC = isDFC;
+            showCurrentFace();
+          } else {
+            // No flip happening — apply foil directly (handles initial load & poll-only updates)
+            applyFoil(data.premium || null, isDFC);
+            renderCounter(currentFaceTypeLine());
+          }
 
           const key = `${cardId || "noid"}:${faceIndex}:${faces[faceIndex]?.image_url || ""}`;
           if (key !== lastRenderedKey) {
