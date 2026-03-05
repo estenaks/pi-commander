@@ -1,322 +1,464 @@
 <!doctype html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Face</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      :root { --bg:#000; --punch-x:0.03; --punch-y:0.03; }
-      html, body { height:100%; margin:0; background:var(--bg); overflow:hidden; }
-      .stage { position:fixed; inset:0; background:var(--bg); }
+	<head>
+		<meta charset="utf-8" />
+		<title>Face</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<link rel="stylesheet" href="/static/card-flip.css" />
+		<link rel="stylesheet" href="/static/premium-effects.css" />
+		<style>
+			:root {
+				--bg: #000;
+				--punch-x: 0.03;
+				--punch-y: 0.03;
+			}
+			html,
+			body {
+				height: 100%;
+				margin: 0;
+				background: var(--bg);
+				overflow: hidden;
+			}
+			.stage {
+				position: fixed;
+				inset: 0;
+				background: var(--bg);
+			}
 
-      #cardWrap {
-        position:absolute; top:0; left:0; width:100vw; height:100vh;
-        transform-origin: top left; transform:none; overflow:hidden;
-      }
-      html.rotate #cardWrap { transform: rotate(90deg) translateY(-100%); }
+			#cardWrap {
+				position: absolute;
+				top: 0;
+				left: 0;
+				width: 100vw;
+				height: 100vh;
+				transform-origin: top left;
+				transform: none;
+				overflow: hidden;
+			}
+			html.rotate #cardWrap {
+				transform: rotate(90deg) translateY(-100%);
+			}
 
-      #card {
-        position:absolute; inset:0; width:100%; height:100%;
-        object-fit: fill; display:block;
-        transform-origin:center center;
-        transform: scale(calc(1 + (2 * var(--punch-x))), calc(1 + (2 * var(--punch-y))));
-      }
+			#card {
+				position: absolute;
+				inset: 0;
+				width: 100%;
+				height: 100%;
+				object-fit: fill;
+				display: block;
+				transform-origin: center center;
+				transform: scale(
+					calc(1 + (2 * var(--punch-x))),
+					calc(1 + (2 * var(--punch-y)))
+				);
+			}
 
-      #clickCatcher { position:absolute; inset:0; z-index:2; cursor:pointer; pointer-events:auto; background:transparent; }
-      .cardOverlay { position:absolute; inset:0; z-index:5; pointer-events:none; }
+			/* Override card-flip.css keyframes to include the punch overscale,
+        so the flip animation never collapses to natural (unscaled) size mid-flip. */
+			@keyframes cardFlipOut {
+				from {
+					transform: scale(
+							calc(1 + (2 * var(--punch-x))),
+							calc(1 + (2 * var(--punch-y)))
+						)
+						scaleX(1);
+				}
+				to {
+					transform: scale(
+							calc(1 + (2 * var(--punch-x))),
+							calc(1 + (2 * var(--punch-y)))
+						)
+						scaleX(0);
+				}
+			}
+			@keyframes cardFlipIn {
+				from {
+					transform: scale(
+							calc(1 + (2 * var(--punch-x))),
+							calc(1 + (2 * var(--punch-y)))
+						)
+						scaleX(0);
+				}
+				to {
+					transform: scale(
+							calc(1 + (2 * var(--punch-x))),
+							calc(1 + (2 * var(--punch-y)))
+						)
+						scaleX(1);
+				}
+			}
 
-      .btn {
-        height:64px; min-width:64px; padding:0 18px;
-        display:inline-grid; place-items:center;
-        color:rgba(255,255,255,0.92);
-        background:rgba(0,0,0,0.35);
-        border:1px solid rgba(255,255,255,0.18);
-        border-radius:999px;
-        font:44px/1 sans-serif;
-        user-select:none;
-        pointer-events:auto;
-      }
-      .btn.smallText { font-size:28px; font-weight:600; letter-spacing:0.5px; }
-      .btn.pm { height:48px; min-width:48px; padding:0 14px; font-size:32px; }
-      #countBtn[hidden] { display:none !important; }
+			#clickCatcher {
+				position: absolute;
+				inset: 0;
+				z-index: 2;
+				cursor: pointer;
+				pointer-events: auto;
+				background: transparent;
+			}
+			.cardOverlay {
+				position: absolute;
+				inset: 0;
+				z-index: 5;
+				pointer-events: none;
+			}
 
-      .counterBar {
-        position:absolute; top:33.333%; left:0; right:0; transform:translateY(-50%);
-        display:flex; align-items:center; justify-content:space-between;
-      }
-      .counterCenter { flex:1; display:flex; justify-content:center; padding:0 12px; }
+			.btn {
+				height: 64px;
+				min-width: 64px;
+				padding: 0 18px;
+				display: inline-grid;
+				place-items: center;
+				color: rgba(255, 255, 255, 0.92);
+				background: rgba(0, 0, 0, 0.35);
+				border: 1px solid rgba(255, 255, 255, 0.18);
+				border-radius: 999px;
+				font: 44px/1 sans-serif;
+				user-select: none;
+				pointer-events: auto;
+			}
+			.btn.smallText {
+				font-size: 28px;
+				font-weight: 600;
+				letter-spacing: 0.5px;
+			}
+			.btn.pm {
+				height: 48px;
+				min-width: 48px;
+				padding: 0 14px;
+				font-size: 32px;
+			}
+			#countBtn[hidden] {
+				display: none !important;
+			}
 
-      .screenOverlay {
-        position: absolute;
-        inset: 0;
-        z-index: 20;
-        pointer-events: none;
-      }
+			.counterBar {
+				position: absolute;
+				top: 33.333%;
+				left: 0;
+				right: 0;
+				transform: translateY(-50%);
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+			}
+			.counterCenter {
+				flex: 1;
+				display: flex;
+				justify-content: center;
+				padding: 0 12px;
+			}
 
-      .qr {
-        position: absolute;
-        top: 12px;
-        left: 12px;
-        background: rgba(0,0,0,0.55);
-        border: 1px solid rgba(255,255,255,0.25);
-        padding: 10px;
-        border-radius: 8px;
-        backdrop-filter: blur(2px);
-      }
+			.screenOverlay {
+				position: absolute;
+				inset: 0;
+				z-index: 20;
+				pointer-events: none;
+			}
 
-      .qr canvas {
-        width: 140px;
-        height: 140px;
-        image-rendering: pixelated;
-        display: block;
-        background: #fff;
-      }
+			.qr {
+				position: absolute;
+				top: 12px;
+				left: 12px;
+				background: rgba(0, 0, 0, 0.55);
+				border: 1px solid rgba(255, 255, 255, 0.25);
+				padding: 10px;
+				border-radius: 8px;
+				backdrop-filter: blur(2px);
+			}
 
-      .qr .label {
-        margin-top: 8px;
-        color: #fff;
-        font: 12px/1.2 sans-serif;
-        max-width: 220px;
-        word-break: break-word;
-        opacity: 0.95;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="stage">
-      <div id="cardWrap">
-        <img id="card" alt="" />
-        <div id="clickCatcher" title="Tap to flip"></div>
+			.qr canvas {
+				width: 140px;
+				height: 140px;
+				image-rendering: pixelated;
+				display: block;
+				background: #fff;
+			}
 
-        {% include "_face_overlay.html" %}
-      </div>
+			.qr .label {
+				margin-top: 8px;
+				color: #fff;
+				font: 12px/1.2 sans-serif;
+				max-width: 220px;
+				word-break: break-word;
+				opacity: 0.95;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="stage">
+			<div id="cardWrap">
+				<img id="card" alt="" />
+				<div id="clickCatcher" title="Tap to flip"></div>
 
-      <div class="screenOverlay">
-        <div id="qrWrap" class="qr" hidden>
-          <canvas id="qr" width="140" height="140"></canvas>
-          <div id="qrLabel" class="label"></div>
-        </div>
-      </div>
-    </div>
+				{% include "_face_overlay.html" %}
+			</div>
 
-    <script>
-      const PLAYER = {{ player|int }};
-      const QR_HOST = "raspberrypi.local"; // IMPORTANT: resolves on other devices
+			<div class="screenOverlay">
+				<div id="qrWrap" class="qr" hidden>
+					<canvas id="qr" width="140" height="140"></canvas>
+					<div id="qrLabel" class="label"></div>
+				</div>
+			</div>
+		</div>
+		<script src="/static/card-flip.js"></script>
+		<script>
+			const PLAYER = {{ player|int }};
+			const QR_HOST = "raspberrypi.local"; // IMPORTANT: resolves on other devices
+			const BASE_URL = "http://{{ LOCAL_IP }}{{ DEV_PORT }}";
 
-      function getRotateOverride() {
-        const p = new URLSearchParams(window.location.search);
-        if (!p.has("rotate")) return false;
-        const v = (p.get("rotate") || "").trim().toLowerCase();
-        return ["1","true","yes","on"].includes(v);
-      }
-      const rotate = getRotateOverride();
-      if (rotate) document.documentElement.classList.add("rotate");
 
-      function externalBaseUrl() {
-        const proto = location.protocol || "http:";
-        const port = location.port ? `:${location.port}` : "";
-        return `${proto}//${QR_HOST}${port}`;
-      }
+			function getRotateOverride() {
+			  const p = new URLSearchParams(window.location.search);
+			  if (!p.has("rotate")) return false;
+			  const v = (p.get("rotate") || "").trim().toLowerCase();
+			  return ["1","true","yes","on"].includes(v);
+			}
+			const rotate = getRotateOverride();
+			if (rotate) document.documentElement.classList.add("rotate");
 
-      const cardWrap = document.getElementById("cardWrap");
-      const img = document.getElementById("card");
-      const clickCatcher = document.getElementById("clickCatcher");
+			function externalBaseUrl() {
+			  return BASE_URL;
+			}
 
-      function fitCardWrapToViewport(naturalW, naturalH) {
-        if (!naturalW || !naturalH) return;
-        const vw = window.innerWidth, vh = window.innerHeight;
-        const availW = rotate ? vh : vw;
-        const availH = rotate ? vw : vh;
-        const scale = Math.min(availW / naturalW, availH / naturalH);
-        cardWrap.style.width = Math.floor(naturalW * scale) + "px";
-        cardWrap.style.height = Math.floor(naturalH * scale) + "px";
-      }
+			const cardWrap = document.getElementById("cardWrap");
+			const img = document.getElementById("card");
+			const clickCatcher = document.getElementById("clickCatcher");
 
-      let counter = 0;
+			function fitCardWrapToViewport(naturalW, naturalH) {
+			  if (!naturalW || !naturalH) return;
+			  const vw = window.innerWidth, vh = window.innerHeight;
+			  const availW = rotate ? vh : vw;
+			  const availH = rotate ? vw : vh;
+			  const scale = Math.min(availW / naturalW, availH / naturalH);
+			  cardWrap.style.width = Math.floor(naturalW * scale) + "px";
+			  cardWrap.style.height = Math.floor(naturalH * scale) + "px";
+			}
 
-      const minusBtn = document.getElementById("minusBtn");
-      const plusBtn = document.getElementById("plusBtn");
-      const countBtn = document.getElementById("countBtn");
+			let counter = 0;
 
-      function isPlaneswalkerTypeLine(typeLine) {
-        return typeof typeLine === "string" && typeLine.includes("Planeswalker");
-      }
+			const minusBtn = document.getElementById("minusBtn");
+			const plusBtn = document.getElementById("plusBtn");
+			const countBtn = document.getElementById("countBtn");
 
-      function renderCounter(currentFaceTypeLine) {
-        if (counter === 0) {
-          countBtn.hidden = true;
-          countBtn.setAttribute("aria-hidden", "true");
-          countBtn.textContent = "";
-          return;
-        }
-        countBtn.hidden = false;
-        countBtn.setAttribute("aria-hidden", "false");
+			function isPlaneswalkerTypeLine(typeLine) {
+			  return typeof typeLine === "string" && typeLine.includes("Planeswalker");
+			}
 
-        if (isPlaneswalkerTypeLine(currentFaceTypeLine)) {
-          countBtn.textContent = String(counter);
-          return;
-        }
-        if (counter > 0) countBtn.textContent = `+${counter}/+${counter}`;
-        else countBtn.textContent = `${counter}/${counter}`;
-      }
+			function renderCounter(currentFaceTypeLine) {
+			  if (counter === 0) {
+			    countBtn.hidden = true;
+			    countBtn.setAttribute("aria-hidden", "true");
+			    countBtn.textContent = "";
+			    return;
+			  }
+			  countBtn.hidden = false;
+			  countBtn.setAttribute("aria-hidden", "false");
 
-      function dec() { counter -= 1; renderCounter(currentFaceTypeLine()); }
-      function inc() { counter += 1; renderCounter(currentFaceTypeLine()); }
+			  if (isPlaneswalkerTypeLine(currentFaceTypeLine)) {
+			    countBtn.textContent = String(counter);
+			    return;
+			  }
+			  if (counter > 0) countBtn.textContent = `+${counter}/+${counter}`;
+			  else countBtn.textContent = `${counter}/${counter}`;
+			}
 
-      function wireButton(el, fn) {
-        el.addEventListener("click", fn);
-        el.addEventListener("keydown", (e) => {
-          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); }
-        });
-      }
-      wireButton(minusBtn, dec);
-      wireButton(plusBtn, inc);
+			function dec() { counter -= 1; renderCounter(currentFaceTypeLine()); }
+			function inc() { counter += 1; renderCounter(currentFaceTypeLine()); }
 
-      let lastCardId = null;
-      let faces = [];
-      let faceIndex = 0;
+			function wireButton(el, fn) {
+			  el.addEventListener("click", fn);
+			  el.addEventListener("keydown", (e) => {
+			    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); }
+			  });
+			}
+			wireButton(minusBtn, dec);
+			wireButton(plusBtn, inc);
 
-      function cacheBust(url) {
-        if (!url) return url;
-        try {
-          const u = new URL(url, location.origin);
-          u.searchParams.set("_t", Date.now().toString());
-          return u.toString();
-        } catch {
-          const joiner = url.includes("?") ? "&" : "?";
-          return url + joiner + "_t=" + Date.now().toString();
-        }
-      }
+			let lastCardId = null;
+			let faces = [];
+			let faceIndex = 0;
+			let currentPremium = null;  // "foil" | null
+			let currentIsDFC = false;
 
-      function currentFaceTypeLine() {
-        const f = faces && faces[faceIndex];
-        return f ? f.type_line : "";
-      }
+			function cacheBust(url) {
+			  if (!url) return url;
+			  try {
+			    const u = new URL(url, location.origin);
+			    u.searchParams.set("_t", Date.now().toString());
+			    return u.toString();
+			  } catch {
+			    const joiner = url.includes("?") ? "&" : "?";
+			    return url + joiner + "_t=" + Date.now().toString();
+			  }
+			}
 
-      function showCurrentFace() {
-        const f = faces && faces[faceIndex];
-        if (!f || !f.image_url) return;
-        img.src = cacheBust(f.image_url);
-        renderCounter(currentFaceTypeLine());
-      }
+			function currentFaceTypeLine() {
+			  const f = faces && faces[faceIndex];
+			  return f ? f.type_line : "";
+			}
 
-      clickCatcher.addEventListener("click", () => {
-        if (!faces || faces.length < 2) return;
-        faceIndex = (faceIndex + 1) % 2;
-        showCurrentFace();
-      });
+			function showCurrentFace(animate = false) {
+			  const f = faces && faces[faceIndex];
+			  if (!f || !f.image_url) return;
+			  animatedCardFlip(img, cacheBust(f.image_url), () => {
+			      // At scaleX(0) midpoint: swap foil state in sync with the image swap
+			      applyFoil(currentPremium, currentIsDFC);
+			      renderCounter(currentFaceTypeLine());
+			  }, !animate || rotate);
+			}
 
-      async function loadQrLib() {
-        const src = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
-        await new Promise((resolve, reject) => {
-          const s = document.createElement("script");
-          s.src = src;
-          s.onload = resolve;
-          s.onerror = () => reject(new Error("Failed to load QR library"));
-          document.head.appendChild(s);
-        });
-      }
+			function applyFoil(premium, isDFC) {
+			  currentPremium = premium;
+			  currentIsDFC = isDFC;
 
-      function drawQrToCanvas(text, canvas) {
-        const qr = window.qrcode(0, "M");
-        qr.addData(text);
-        qr.make();
+			  // Foil shows on: front face always, back face only for DFC
+			  const showFoil = premium === 'foil' && (faceIndex === 0 || isDFC);
 
-        const ctx = canvas.getContext("2d");
-        const count = qr.getModuleCount();
-        const size = canvas.width;
-        const scale = Math.floor(size / count);
-        const offset = Math.floor((size - count * scale) / 2);
+			  // /* Uncomment when ready to test rotate/slow-display support:
+			  // if (showFoil && rotate) {
+			  //   cardWrap.classList.remove('foil');
+			  //   cardWrap.classList.add('foil-static');
+			  // } else if (showFoil) {
+			  //   cardWrap.classList.remove('foil-static');
+			  //   cardWrap.classList.add('foil');
+			  // } else {
+			  //   cardWrap.classList.remove('foil', 'foil-static');
+			  // }
+			  // */
 
-        ctx.fillStyle = "#fff";
-        ctx.fillRect(0, 0, size, size);
+			  if (showFoil) {
+			    cardWrap.classList.add('foil');
+			  } else {
+			    cardWrap.classList.remove('foil');
+			  }
+			}
 
-        ctx.fillStyle = "#000";
-        for (let r = 0; r < count; r++) {
-          for (let c = 0; c < count; c++) {
-            if (qr.isDark(r, c)) {
-              ctx.fillRect(offset + c * scale, offset + r * scale, scale, scale);
-            }
-          }
-        }
-      }
+			clickCatcher.addEventListener("click", () => {
+			  if (!faces || faces.length < 2) return;
+			  faceIndex = (faceIndex + 1) % 2;
+			  showCurrentFace(true);   // animate on manual tap — applyFoil fires mid-flip via onSwap
+			});
 
-      let qrLoaded = false;
-      async function showQr() {
-        const wrap = document.getElementById("qrWrap");
-        const canvas = document.getElementById("qr");
-        const label = document.getElementById("qrLabel");
+			async function loadQrLib() {
+			  const src = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
+			  await new Promise((resolve, reject) => {
+			    const s = document.createElement("script");
+			    s.src = src;
+			    s.onload = resolve;
+			    s.onerror = () => reject(new Error("Failed to load QR library"));
+			    document.head.appendChild(s);
+			  });
+			}
 
-        const url = `${externalBaseUrl()}/config`;
-        label.textContent = url;
+			function drawQrToCanvas(text, canvas) {
+			  const qr = window.qrcode(0, "M");
+			  qr.addData(text);
+			  qr.make();
 
-        try {
-          if (!qrLoaded) {
-            await loadQrLib();
-            qrLoaded = true;
-          }
-          drawQrToCanvas(url, canvas);
-          canvas.style.display = "block";
-        } catch {
-          canvas.style.display = "none";
-        }
+			  const ctx = canvas.getContext("2d");
+			  const count = qr.getModuleCount();
+			  const size = canvas.width;
+			  const scale = Math.floor(size / count);
+			  const offset = Math.floor((size - count * scale) / 2);
 
-        wrap.hidden = false;
-      }
+			  ctx.fillStyle = "#fff";
+			  ctx.fillRect(0, 0, size, size);
 
-      function hideQr() {
-        document.getElementById("qrWrap").hidden = true;
-      }
+			  ctx.fillStyle = "#000";
+			  for (let r = 0; r < count; r++) {
+			    for (let c = 0; c < count; c++) {
+			      if (qr.isDark(r, c)) {
+			        ctx.fillRect(offset + c * scale, offset + r * scale, scale, scale);
+			      }
+			    }
+			  }
+			}
 
-      let lastRenderedKey = null;
+			let qrLoaded = false;
+			async function showQr() {
+			  const wrap = document.getElementById("qrWrap");
+			  const canvas = document.getElementById("qr");
+			  const label = document.getElementById("qrLabel");
 
-      async function poll() {
-        try {
-          const r = await fetch(`/api/current/${PLAYER}`, { cache: "no-store" });
-          const data = await r.json();
+			  const url = `${externalBaseUrl()}/config`;
+			  label.textContent = url;
 
-          const cardId = data.card_id || null;
-          const nextFaces = Array.isArray(data.faces) ? data.faces : [];
-          // A face is valid if it has any image_url (including local /cardback.jpg)
-          const hasCard = nextFaces.length > 0 && nextFaces[0] && nextFaces[0].image_url;
+			  try {
+			    if (!qrLoaded) {
+			      await loadQrLib();
+			      qrLoaded = true;
+			    }
+			    drawQrToCanvas(url, canvas);
+			    canvas.style.display = "block";
+			  } catch {
+			    canvas.style.display = "none";
+			  }
 
-          if (!hasCard) {
-            if (lastRenderedKey !== "") {
-              lastRenderedKey = "";
-              img.removeAttribute("src");
-            }
-            showQr();
-            return;
-          }
+			  wrap.hidden = false;
+			}
 
-          hideQr();
+			function hideQr() {
+			  document.getElementById("qrWrap").hidden = true;
+			}
 
-          if (cardId && cardId !== lastCardId) {
-            lastCardId = cardId;
-            faceIndex = 0;
-          }
+			let lastRenderedKey = null;
 
-          faces = nextFaces;
-          faceIndex = Math.min(faceIndex, Math.max(0, faces.length - 1));
+			async function poll() {
+			  try {
+			    const r = await fetch(`/api/current/${PLAYER}`, { cache: "no-store" });
+			    const data = await r.json();
 
-          const key = `${cardId || "noid"}:${faceIndex}:${faces[faceIndex]?.image_url || ""}`;
-          if (key !== lastRenderedKey) {
-            lastRenderedKey = key;
-            showCurrentFace();
-          } else {
-            renderCounter(currentFaceTypeLine());
-          }
-        } catch {
-          // keep last state
-        }
-      }
+			    const cardId = data.card_id || null;
+			    const nextFaces = Array.isArray(data.faces) ? data.faces : [];
+			    // A face is valid if it has any image_url (including local /cardback.jpg)
+			    const hasCard = nextFaces.length > 0 && nextFaces[0] && nextFaces[0].image_url;
 
-      img.addEventListener("load", () => fitCardWrapToViewport(img.naturalWidth, img.naturalHeight));
-      window.addEventListener("resize", () => fitCardWrapToViewport(img.naturalWidth, img.naturalHeight));
+			    if (!hasCard) {
+			      if (lastRenderedKey !== "") {
+			        lastRenderedKey = "";
+			        img.removeAttribute("src");
+			      }
+			      showQr();
+			      return;
+			    }
 
-      renderCounter("");
-      poll();
-      setInterval(poll, 1000);
-    </script>
-  </body>
+			    hideQr();
+
+			    if (cardId && cardId !== lastCardId) {
+			      lastCardId = cardId;
+			      faceIndex = 0;
+			    }
+
+			    faces = nextFaces;
+			    faceIndex = Math.min(faceIndex, Math.max(0, faces.length - 1));
+
+			    // Determine if this card is dual-faced (face[1] has a real image, not the cardback sentinel)
+			    const isDFC = faces.length >= 2 && faces[1] && faces[1].image_url !== "/cardback.jpg";
+
+			    const key = `${cardId || "noid"}:${faceIndex}:${faces[faceIndex]?.image_url || ""}`;
+			    if (key !== lastRenderedKey) {
+			      lastRenderedKey = key;
+			      // Store latest values so showCurrentFace's onSwap can read them mid-flip
+			      currentPremium = data.premium || null;
+			      currentIsDFC = isDFC;
+			      showCurrentFace();
+			    } else {
+			      // No flip happening — apply foil directly (handles initial load & poll-only updates)
+			      applyFoil(data.premium || null, isDFC);
+			      renderCounter(currentFaceTypeLine());
+			    }
+			  } catch {
+			    // keep last state
+			  }
+			}
+
+			img.addEventListener("load", () => fitCardWrapToViewport(img.naturalWidth, img.naturalHeight));
+			window.addEventListener("resize", () => fitCardWrapToViewport(img.naturalWidth, img.naturalHeight));
+
+			renderCounter("");
+			poll();
+			setInterval(poll, 1000);
+		</script>
+	</body>
 </html>

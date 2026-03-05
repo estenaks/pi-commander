@@ -1,292 +1,77 @@
-from flask import Flask, render_template, request, jsonify, send_file
-import urllib.request
-import urllib.parse
-import json
-import threading
-import urllib.error
 import io
-import os
 import sys
-import qrcode
+import socket
+import threading
+import urllib.parse
 
-from PIL import Image, ImageDraw, ImageFont
+from flask import Flask, render_template, request, jsonify, send_file
+import os
+
+import cache as _cache_module
+import images as _images_module
+from cache import _cache_lock, _cleanup_old_cache, _get_cache_size_gb
+from images import _any_to_bmp, init_fallback_bmps
+from scryfall import (
+    PLAYERS,
+    _bmp_cache,
+    _state_lock,
+    _state_by_player,
+    _require_player,
+    _scryfall_get,
+    _set_player_state,
+    _get_all_sets,
+    _get_full_set_data,
+    _get_cards_by_rarity_from_set,
+    _select_random_cards_from_pool,
+    _get_rare_or_mythic_card_from_set,
+    _get_common_land_from_set,
+)
+import random
+import time
 
 app = Flask(__name__)
 
 CARD_BACK_PATH = os.path.join(os.path.dirname(__file__), "cardback.jpg")
-CARD_BACK_WEB_URL = "/cardback.jpg"   # served to browser / used in faces_meta
-# Set CONFIG_PORT to ":8000" if not using nginx to forward port 80, otherwise leave blank
-CONFIG_PORT = ""
+CARD_BACK_WEB_URL = "/cardback.jpg"
 
-PLAYERS = [1, 2, 3, 4]
+# Port suffix — use ":8000" for dev, comment out (set to "") for prod on port 80
+DEV_PORT = ":8000"
+# DEV_PORT = ""
 
-_state_lock = threading.Lock()
-_state_by_player = {
-    p: {
-        "last_query": None,
-        "card_id": None,
-        # always length 2 when set:
-        # [{"image_url": "...", "type_line": "..."}, {"image_url": "...", "type_line": "..."}]
-        "faces_meta": [],
-        # backward compat for older previews:
-        "border_crop_url": None,
-    }
-    for p in PLAYERS
+EXCLUDED_SET_CODES = {
+    "pred",
+    "h17",
+    "phtr",
+    "punk",
+    "klr",
+    "h2r"
 }
 
-# BMP cache: keyed by (player, face) where face is "front" or "back"
-# Protected by _state_lock
-_bmp_cache: dict[tuple[int, str], bytes] = {}
-
-
-# ---- Image helpers ----
-
-def _image_to_bmp(data: bytes) -> bytes:
-    img = Image.open(io.BytesIO(data))
-    orig_w, orig_h = img.size
-    new_h = 480
-    new_w = max(1, round(orig_w * new_h / orig_h))
-    img = img.resize((new_w, new_h), Image.LANCZOS)
-    if new_w > 320:
-        left = (new_w - 320) // 2
-        img = img.crop((left, 0, left + 320, 480))
-    elif new_w < 320:
-        padded = Image.new("RGB", (320, 480), (0, 0, 0))
-        padded.paste(img, ((320 - new_w) // 2, 0))
-        img = padded
-    img = img.convert("RGB")
-    img = img.rotate(90, expand=True)  # → 480×320 landscape for the Pico display
-    buf = io.BytesIO()
-    img.save(buf, format="BMP")
-    return buf.getvalue()
-
-
-def _url_to_bmp(url: str) -> bytes:
-    """Fetch a remote image and convert to BMP."""
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "raspberrypi-webserver-poc/0.1",
-            "Accept": "image/*",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        data = resp.read()
-    return _image_to_bmp(data)
-
-
-def _file_to_bmp(path: str) -> bytes:
-    """Read a local image file and convert to BMP."""
-    with open(path, "rb") as f:
-        return _image_to_bmp(f.read())
-
-
-def _any_to_bmp(url_or_path: str) -> bytes:
-    """Convert either a remote URL or the local card-back sentinel to BMP."""
-    if url_or_path == CARD_BACK_WEB_URL:
-        return _file_to_bmp(CARD_BACK_PATH)
-    if url_or_path.startswith("http://") or url_or_path.startswith("https://"):
-        return _url_to_bmp(url_or_path)
-    return _file_to_bmp(url_or_path)
-
-
-def _make_config_prompt_bmp() -> bytes:
-    """Generate a 320×480 placeholder BMP with a QR code and text
-    telling the user to visit /config."""
-    import qrcode
-
-    config_url = f"http://raspberrypi.local{CONFIG_PORT}/config"
-
-    qr = qrcode.QRCode(border=2)
-    qr.add_data(config_url)
-    qr.make(fit=True)
-    qr_img = qr.make_image(fill_color="white", back_color="black").convert("RGB")
-
-    qr_size = 240
-    qr_img = qr_img.resize((qr_size, qr_size), Image.NEAREST)
-
-    img = Image.new("RGB", (320, 480), (0, 0, 0))
-    draw = ImageDraw.Draw(img)
-
-    qr_x = (320 - qr_size) // 2
-    qr_y = 60
-    img.paste(qr_img, (qr_x, qr_y))
-
-    font_large = ImageFont.load_default(size=20)
-    font_small = ImageFont.load_default(size=16)
-    lines = [
-        ("No card configured.", font_large),
-        ("", None),
-        ("Scan or visit /config", font_small),
-        ("then reboot the Pico.", font_small),
-    ]
-    y = qr_y + qr_size + 16
-    for line, font in lines:
-        if line and font:
-            bbox = draw.textbbox((0, 0), line, font=font)
-            text_w = bbox[2] - bbox[0]
-            draw.text(((320 - text_w) // 2, y), line, fill=(255, 255, 255), font=font)
-        y += 28
-
-    img = img.rotate(90, expand=True)  # → 480×320 landscape, same as card BMPs
-    buf = io.BytesIO()
-    img.save(buf, format="BMP")
-    return buf.getvalue()
-
+# Wire path/URL constants into submodules
+_images_module.CARD_BACK_PATH = CARD_BACK_PATH
+_images_module.CARD_BACK_WEB_URL = CARD_BACK_WEB_URL
 
 # Pre-generate fallback BMPs at startup
-_CONFIG_PROMPT_BMP: bytes = _make_config_prompt_bmp()
-
-_CARD_BACK_BMP: bytes | None = None
-try:
-    _CARD_BACK_BMP = _file_to_bmp(CARD_BACK_PATH)
-except Exception as _exc:
-    print(f"[bmp] Warning: could not load cardback.jpg: {_exc}", file=sys.stderr)
+_CONFIG_PROMPT_BMP, _CARD_BACK_BMP = init_fallback_bmps(CARD_BACK_PATH)
 
 
-# ---- State helpers ----
-
-def _require_player(player: int) -> int:
-    if player not in _state_by_player:
-        raise ValueError("Invalid player. Must be 1..4.")
-    return player
-
-
-def _scryfall_get(url: str) -> dict:
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "raspberrypi-webserver-poc/0.1",
-            "Accept": "application/json",
-        },
-        method="GET",
-    )
+def _get_local_ip() -> str:
+    """Return the LAN IP of this machine, e.g. 192.168.1.42"""
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = resp.read().decode("utf-8")
-            return json.loads(data)
-    except urllib.error.HTTPError as e:
-        body = ""
-        try:
-            body = e.read().decode("utf-8")
-        except Exception:
-            body = ""
-        raise RuntimeError(f"Scryfall HTTP {e.code}: {body or e.reason}") from e
-    except Exception as e:
-        raise RuntimeError(f"Scryfall request failed: {type(e).__name__}: {e}") from e
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
 
 
-def _pick_image_border_crop_only(iu: dict) -> str:
-    if not isinstance(iu, dict):
-        return ""
-    return (
-        iu.get("border_crop")
-        or iu.get("normal")
-        or iu.get("large")
-        or iu.get("png")
-        or iu.get("art_crop")  # last resort
-        or ""
-    )
+LOCAL_IP = _get_local_ip()
 
-
-def _extract_faces_meta_always_two(card: dict) -> list[dict]:
-    # DFC / modal etc
-    faces = card.get("card_faces") or []
-    if isinstance(faces, list) and len(faces) >= 2:
-        f0 = faces[0] or {}
-        f1 = faces[1] or {}
-
-        u0 = _pick_image_border_crop_only((f0.get("image_uris") or {}))
-        u1 = _pick_image_border_crop_only((f1.get("image_uris") or {}))
-
-        tl0 = f0.get("type_line") if isinstance(f0.get("type_line"), str) else ""
-        tl1 = f1.get("type_line") if isinstance(f1.get("type_line"), str) else ""
-
-        if u0:
-            if not u1:
-                u1 = u0
-            return [
-                {"image_url": u0, "type_line": tl0},
-                {"image_url": u1, "type_line": tl1},
-            ]
-
-    # single-faced — use local card back as back face
-    iu = card.get("image_uris") or {}
-    front = _pick_image_border_crop_only(iu)
-    if not front:
-        return []
-
-    tl = card.get("type_line") if isinstance(card.get("type_line"), str) else ""
-    return [
-        {"image_url": front, "type_line": tl},
-        {"image_url": CARD_BACK_WEB_URL, "type_line": "Card Back"},
-    ]
-
-
-def _extract_border_crop(card: dict) -> str:
-    border_crop = (card.get("image_uris") or {}).get("border_crop")
-    if border_crop:
-        return border_crop
-    faces = card.get("card_faces") or []
-    for face in faces:
-        bc = (face.get("image_uris") or {}).get("border_crop")
-        if bc:
-            return bc
-    return ""
-
-
-def _generate_bmps(player: int) -> None:
-    """Generate and cache BMP images for both faces of *player*'s current card.
-
-    Called outside _state_lock — reads state under lock, does network I/O,
-    then writes cache under lock. All errors are caught so they never crash
-    the server.
-    """
-    with _state_lock:
-        faces_meta = list(_state_by_player[player]["faces_meta"])
-        card_id = _state_by_player[player]["card_id"]
-
-    if not faces_meta:
-        return
-
-    front_url = faces_meta[0]["image_url"]
-    back_url = faces_meta[1]["image_url"] if len(faces_meta) > 1 else CARD_BACK_WEB_URL
-
-    for face, url in (("front", front_url), ("back", back_url)):
-        try:
-            bmp_bytes = _any_to_bmp(url)
-            with _state_lock:
-                # Only cache if the player's card hasn't changed during conversion
-                if _state_by_player[player]["card_id"] == card_id:
-                    _bmp_cache[(player, face)] = bmp_bytes
-        except Exception as exc:
-            print(f"[bmp] Error generating {face} BMP for player {player}: {exc}", file=sys.stderr)
-
-
-def _set_player_state(player: int, *, last_query: str, card: dict) -> dict:
-    faces_meta = _extract_faces_meta_always_two(card)
-    if not faces_meta:
-        raise RuntimeError("No suitable image found for this card")
-
-    border_crop = _extract_border_crop(card) or faces_meta[0]["image_url"]
-
-    with _state_lock:
-        st = _state_by_player[player]
-        st["last_query"] = last_query
-        st["card_id"] = card.get("id")
-        st["faces_meta"] = faces_meta
-        st["border_crop_url"] = border_crop
-
-        result = {
-            "last_query": st["last_query"],
-            "card_id": st["card_id"],
-            "faces": st["faces_meta"],
-            "border_crop_url": st["border_crop_url"],
-        }
-
-    # BMP generation after state is set (outside lock) so /face etc. are unaffected
-    _generate_bmps(player)
-    return result
+# Inject into all templates as a global
+app.jinja_env.globals["LOCAL_IP"] = LOCAL_IP
+app.jinja_env.globals["DEV_PORT"] = DEV_PORT
 
 
 # ---- Routes ----
@@ -326,6 +111,127 @@ def config():
     return render_template("config.html")
 
 
+@app.get("/booster")
+def booster():
+    return render_template("booster.html")
+
+
+# ---- Booster API endpoints ----
+
+@app.get("/api/booster/sets")
+def api_booster_sets():
+    """Get all available Magic sets for booster generation."""
+    try:
+        with _cache_lock:
+            _cleanup_old_cache()
+
+        sets_data = _get_all_sets()
+
+        eligible_sets = []
+        for set_data in sets_data:
+            set_type = set_data.get("set_type", "")
+            set_code = set_data.get("code", "").lower()
+            set_name = set_data.get("name", "").lower()
+
+            if set_code in EXCLUDED_SET_CODES:
+                continue
+
+            if (set_name.endswith("commander") or
+                (set_name.startswith("commander") and any(char.isdigit() for char in set_name)) or
+                " commander" in set_name or
+                "jumpstart" in set_name or
+                "etarnal" in set_name):
+                continue
+
+            if set_type in ["expansion", "core", "masters", "draft_innovation", "commander", "funny", "starter", "eternal"]:
+                eligible_sets.append({
+                    "code": set_data.get("code"),
+                    "name": set_data.get("name"),
+                    "released_at": set_data.get("released_at"),
+                    "card_count": set_data.get("card_count", 0),
+                    "set_type": set_type,
+                    "icon_svg_uri": set_data.get("icon_svg_uri", ""),
+                })
+
+        return jsonify({
+            "sets": eligible_sets,
+            "cache_size_gb": round(_get_cache_size_gb(), 2),
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/api/booster/single")
+def api_booster_single_card():
+    """Get a single random card for progressive pack generation."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        set_code = payload.get("set_code", "").strip().lower()
+        rarity = payload.get("rarity", "").strip().lower()
+        exclude_ids = set(payload.get("exclude_ids", []))
+
+        if not set_code:
+            return jsonify({"error": "Missing set_code parameter"}), 400
+        if not rarity:
+            return jsonify({"error": "Missing rarity parameter"}), 400
+
+        print(f"[booster] Fetching single {rarity} card for {set_code} (excluding {len(exclude_ids)} cards)")
+        start_time = time.time()
+
+        set_cards = _get_full_set_data(set_code)
+
+        if not set_cards:
+            return jsonify({"error": f"No cards found for set {set_code}"}), 404
+
+        if rarity == "rare":
+            card = _get_rare_or_mythic_card_from_set(set_cards, exclude_ids)
+            if not card:
+                return jsonify({"error": f"No available rare or mythic cards for set {set_code}"}), 404
+            fetch_time = time.time() - start_time
+            print(f"[booster] Selected {card['rarity']} card in {fetch_time:.3f}s: {card['name']}")
+            return jsonify({"card": card, "from_cache": True, "fetch_time": round(fetch_time, 3)})
+
+        if rarity == "land":
+            card = _get_common_land_from_set(set_cards, exclude_ids)
+            if not card:
+                return jsonify({"error": f"No available land cards for set {set_code}"}), 404
+            fetch_time = time.time() - start_time
+            print(f"[booster] Selected land card in {fetch_time:.3f}s: {card['name']}")
+            return jsonify({"card": card, "from_cache": True, "fetch_time": round(fetch_time, 3)})
+
+        if rarity == "any":
+            available = [card for card in set_cards if card["id"] not in exclude_ids]
+            if not available:
+                return jsonify({"error": f"No available cards for set {set_code}"}), 404
+            card = random.choice(available)
+            fetch_time = time.time() - start_time
+            print(f"[booster] Selected premium card in {fetch_time:.3f}s: {card['name']} ({card['rarity']})")
+            return jsonify({"card": card, "from_cache": True, "fetch_time": round(fetch_time, 3)})
+
+        rarity_pool = _get_cards_by_rarity_from_set(set_cards, rarity)
+        if not rarity_pool:
+            return jsonify({"error": f"No {rarity} cards found for set {set_code}"}), 404
+
+        if rarity == "common":
+            rarity_pool = [card for card in rarity_pool if not card.get("is_common_land")]
+            if not rarity_pool:
+                return jsonify({"error": f"No non-land common cards found for set {set_code}"}), 404
+
+        selected_cards = _select_random_cards_from_pool(rarity_pool, 1, exclude_ids)
+        if not selected_cards:
+            return jsonify({"error": f"No available {rarity} cards for set {set_code}"}), 404
+
+        card = selected_cards[0]
+        fetch_time = time.time() - start_time
+        print(f"[booster] Selected {rarity} card in {fetch_time:.3f}s: {card['name']}")
+        return jsonify({"card": card, "from_cache": True, "fetch_time": round(fetch_time, 3)})
+
+    except Exception as e:
+        print(f"[booster] Error fetching single card: {e}", file=sys.stderr)
+        return jsonify({"error": str(e)}), 500
+
+
 # ---- API (per-player) ----
 
 @app.get("/api/current/<int:player>")
@@ -339,7 +245,27 @@ def api_current_player(player: int):
             "card_id": st["card_id"],
             "faces": st["faces_meta"],
             "border_crop_url": st["border_crop_url"],
+            "premium": st["premium"],
         })
+
+@app.post("/api/send/<int:player>")
+def api_send_player(player: int):
+    """Send a card to a player, with optional premium tag."""
+    _require_player(player)
+    payload = request.get_json(silent=True) or {}
+    query = (payload.get("q") or "").strip()
+    premium = payload.get("premium") or None  # e.g. "foil" or null
+    if not query:
+        return jsonify({"error": "Missing JSON field 'q'"}), 400
+
+    try:
+        params = urllib.parse.urlencode({"fuzzy": query})
+        url = f"https://api.scryfall.com/cards/named?{params}"
+        card = _scryfall_get(url)
+        data = _set_player_state(player, last_query=query, card=card, premium=premium)
+        return jsonify({"ok": True, "player": player, "name": card.get("name"), "premium": premium, **data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
 
 
 @app.post("/api/search/<int:player>")
@@ -421,9 +347,7 @@ def _get_bmp_for_player(player: int, face: str) -> bytes:
         bmp = _bmp_cache.get((player, face))
     if bmp is not None:
         return bmp
-    return _CONFIG_PROMPT_BMP  # no card set for this player — always safe, never raises
-
-
+    return _CONFIG_PROMPT_BMP
 
 
 @app.get("/bmp/<int:player>/front")
@@ -459,27 +383,33 @@ def bmp_all():
     ]
     return jsonify({"files": files})
 
+
 def _print_endpoints(host: str, port: int) -> None:
-    base = f"http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}"
+    ip = LOCAL_IP
+    base = f"http://{ip}{DEV_PORT}"
     lines = [
         "",
         "  pi-commander running — endpoints:",
         "",
-        f"  Browser",
+        "  Browser",
         f"    {base}/",
         f"    {base}/face",
         f"    {base}/player2",
         f"    {base}/player3",
         f"    {base}/player4",
         f"    {base}/config",
+        f"    {base}/booster",
         f"    {base}/cardback.jpg",
         "",
-        f"  API",
+        "  API",
         f"    GET  {base}/api/current/<player>",
         f"    POST {base}/api/search/<player>",
         f"    POST {base}/api/random/<player>",
+        f"    GET  {base}/api/booster/sets",
+        f"    POST {base}/api/booster/single",
+        f"    POST {base}/api/send/<player>",
         "",
-        f"  BMP",
+        "  BMP",
         f"    GET  {base}/bmp/all",
         f"    GET  {base}/bmp/1/front   {base}/bmp/1/back",
         f"    GET  {base}/bmp/2/front   {base}/bmp/2/back",
@@ -489,7 +419,23 @@ def _print_endpoints(host: str, port: int) -> None:
     ]
     print("\n".join(lines))
 
+    # QR code for /face in the console
+    try:
+        import qrcode
+        face_url = f"{base}/face"
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(face_url)
+        qr.make(fit=True)
+        print(f"  Scan to open /face on your phone ({face_url}):")
+        qr.print_ascii(invert=True)
+        print()
+    except ImportError:
+        print(f"  /face → {base}/face  (install 'qrcode' for ASCII QR in console)\n")
+
 
 if __name__ == "__main__":
+    with _cache_lock:
+        _cleanup_old_cache()
+
     _print_endpoints("0.0.0.0", 8000)
     app.run(host="0.0.0.0", port=8000, debug=False)

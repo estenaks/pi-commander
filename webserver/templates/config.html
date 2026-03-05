@@ -1,339 +1,386 @@
 <!doctype html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Config</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      :root {
-        color-scheme: dark;
+	<head>
+		<meta charset="utf-8" />
+		<title>Config</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<style>
+			:root {
+				color-scheme: dark;
 
-        --bg: #0b0f14;
-        --panel: #121826;
-        --text: #e8eef7;
-        --muted: #a8b3c7;
-        --border: rgba(255,255,255,0.14);
-        --border2: rgba(255,255,255,0.10);
-        --shadow: rgba(0,0,0,0.45);
-        --accent: #6aa6ff;
+				--bg: #0b0f14;
+				--panel: #121826;
+				--text: #e8eef7;
+				--muted: #a8b3c7;
+				--border: rgba(255, 255, 255, 0.14);
+				--border2: rgba(255, 255, 255, 0.1);
+				--shadow: rgba(0, 0, 0, 0.45);
+				--accent: #6aa6ff;
 
-        --input-bg: rgba(255,255,255,0.06);
-        --btn-bg: rgba(255,255,255,0.08);
-        --btn-bg-hover: rgba(255,255,255,0.12);
-        --pre-bg: rgba(255,255,255,0.06);
-      }
+				--input-bg: rgba(255, 255, 255, 0.06);
+				--btn-bg: rgba(255, 255, 255, 0.08);
+				--btn-bg-hover: rgba(255, 255, 255, 0.12);
+				--pre-bg: rgba(255, 255, 255, 0.06);
+			}
 
-      body {
-        font-family: sans-serif;
-        padding: 16px;
-        max-width: 900px;
-        background: var(--bg);
-        color: var(--text);
-      }
+			body {
+				font-family: sans-serif;
+				padding: 16px;
+				max-width: 900px;
+				background: var(--bg);
+				color: var(--text);
+			}
 
-      h1 { margin-top: 0; }
-      .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-      input[type="text"], select {
-        padding: 10px;
-        font-size: 16px;
-        flex: 1;
-        min-width: 240px;
-        color: var(--text);
-        background: var(--input-bg);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        outline: none;
-      }
+			h1 {
+				margin-top: 0;
+			}
+			.row {
+				display: flex;
+				gap: 8px;
+				flex-wrap: wrap;
+				align-items: center;
+			}
+			input[type="text"],
+			select {
+				padding: 10px;
+				font-size: 16px;
+				flex: 1;
+				min-width: 240px;
+				color: var(--text);
+				background: var(--input-bg);
+				border: 1px solid var(--border);
+				border-radius: 10px;
+				outline: none;
+			}
 
-      select { flex: 0 0 auto; min-width: 170px; }
+			select {
+				flex: 0 0 auto;
+				min-width: 170px;
+			}
 
-      button {
-        padding: 10px 14px;
-        font-size: 16px;
-        cursor: pointer;
-        color: var(--text);
-        background: var(--btn-bg);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-      }
+			button {
+				padding: 10px 14px;
+				font-size: 16px;
+				cursor: pointer;
+				color: var(--text);
+				background: var(--btn-bg);
+				border: 1px solid var(--border);
+				border-radius: 10px;
+			}
 
-      button:hover { background: var(--btn-bg-hover); }
-      button:active { transform: translateY(1px); }
+			button:hover {
+				background: var(--btn-bg-hover);
+			}
+			button:active {
+				transform: translateY(1px);
+			}
 
-      fieldset {
-        margin-top: 12px;
-        padding: 10px 12px;
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        background: color-mix(in srgb, var(--panel) 70%, transparent);
-      }
+			fieldset {
+				margin-top: 12px;
+				padding: 10px 12px;
+				border: 1px solid var(--border);
+				border-radius: 12px;
+				background: color-mix(in srgb, var(--panel) 70%, transparent);
+			}
 
-      label { margin-right: 12px; white-space: nowrap; }
-      .status { margin-top: 12px; color: var(--muted); }
+			label {
+				margin-right: 12px;
+				white-space: nowrap;
+			}
+			.status {
+				margin-top: 12px;
+				color: var(--muted);
+			}
 
-      img {
-        max-width: 520px;
-        width: 100%;
-        height: auto;
-        display: block;
-        margin-top: 12px;
-        border: 1px solid var(--border2);
-        border-radius: 12px;
-        box-shadow: 0 10px 30px var(--shadow);
-        background: rgba(255,255,255,0.02);
-      }
+			img {
+				max-width: 520px;
+				width: 100%;
+				height: auto;
+				display: block;
+				margin-top: 12px;
+				border: 1px solid var(--border2);
+				border-radius: 12px;
+				box-shadow: 0 10px 30px var(--shadow);
+				background: rgba(255, 255, 255, 0.02);
+			}
 
-      pre {
-        background: var(--pre-bg);
-        padding: 12px;
-        overflow: auto;
-        border: 1px solid var(--border);
-        border-radius: 12px;
-      }
+			pre {
+				background: var(--pre-bg);
+				padding: 12px;
+				overflow: auto;
+				border: 1px solid var(--border);
+				border-radius: 12px;
+			}
 
-      .muted { color: var(--muted); font-size: 13px; margin-top: 6px; }
+			.muted {
+				color: var(--muted);
+				font-size: 13px;
+				margin-top: 6px;
+			}
 
-      .qrBox {
-        margin-top: 12px;
-        padding: 12px;
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        background: color-mix(in srgb, var(--panel) 70%, transparent);
-        display: inline-block;
-      }
+			.qrBox {
+				margin-top: 12px;
+				padding: 12px;
+				border: 1px solid var(--border);
+				border-radius: 12px;
+				background: color-mix(in srgb, var(--panel) 70%, transparent);
+				display: inline-block;
+			}
 
-      .qrRow {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-        flex-wrap: wrap;
-      }
+			.qrRow {
+				display: flex;
+				gap: 12px;
+				align-items: center;
+				flex-wrap: wrap;
+			}
 
-      #qr {
-        width: 140px;
-        height: 140px;
-        image-rendering: pixelated;
-        background: #fff;
-        border-radius: 8px;
-        display: block;
-      }
+			#qr {
+				width: 140px;
+				height: 140px;
+				image-rendering: pixelated;
+				background: #fff;
+				border-radius: 8px;
+				display: block;
+			}
 
-      .qrLabel {
-        color: var(--muted);
-        font-size: 13px;
-        max-width: 520px;
-        word-break: break-word;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>/config</h1>
+			.qrLabel {
+				color: var(--muted);
+				font-size: 13px;
+				max-width: 520px;
+				word-break: break-word;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>/config</h1>
 
-    <div class="row">
-      <select id="player">
-        <option value="1">Player 1 (/face)</option>
-        <option value="2">Player 2 (/player2)</option>
-        <option value="3">Player 3 (/player3)</option>
-        <option value="4">Player 4 (/player4)</option>
-      </select>
+		<div class="row">
+			<select id="player">
+				<option value="1">Player 1 (/face)</option>
+				<option value="2">Player 2 (/player2)</option>
+				<option value="3">Player 3 (/player3)</option>
+				<option value="4">Player 4 (/player4)</option>
+			</select>
 
-      <input id="q" type="text" placeholder='Search card name (fuzzy), e.g. "norin the wary"' />
-      <button id="searchBtn">Search</button>
-      <button id="randomBtn">Get random commander</button>
-    </div>
+			<input
+				id="q"
+				type="text"
+				placeholder='Search card name (fuzzy), e.g. "norin the wary"'
+			/>
+			<button id="searchBtn">Search</button>
+			<button id="randomBtn">Get random commander</button>
+		</div>
 
-    <div class="qrBox" aria-label="QR code for selected player view">
-      <div style="margin-bottom:8px;"><strong>Open on phone</strong></div>
-      <div class="qrRow">
-        <canvas id="qr" width="140" height="140"></canvas>
-        <div>
-          <div class="qrLabel" id="qrLabel"></div>
-          <div class="muted">Scan to open the selected player screen on your phone.</div>
-        </div>
-      </div>
-    </div>
+		<div class="qrBox" aria-label="QR code for selected player view">
+			<div style="margin-bottom: 8px"><strong>Open on phone</strong></div>
+			<div class="qrRow">
+				<canvas id="qr" width="140" height="140"></canvas>
+				<div>
+					<div class="qrLabel" id="qrLabel"></div>
+					<div class="muted">
+						Scan to open the selected player screen on your phone.
+					</div>
+				</div>
+			</div>
+		</div>
 
-    <fieldset>
-      <legend>Random filters</legend>
+		<fieldset>
+			<legend>Random filters</legend>
 
-      <div style="margin-bottom:8px;">
-        <strong>Color identity (exactly):</strong>
-      </div>
+			<div style="margin-bottom: 8px">
+				<strong>Color identity (exactly):</strong>
+			</div>
 
-      <label><input type="checkbox" class="ci" value="w"> White</label>
-      <label><input type="checkbox" class="ci" value="u"> Blue</label>
-      <label><input type="checkbox" class="ci" value="b"> Black</label>
-      <label><input type="checkbox" class="ci" value="r"> Red</label>
-      <label><input type="checkbox" class="ci" value="g"> Green</label>
+			<label><input type="checkbox" class="ci" value="w" /> White</label>
+			<label><input type="checkbox" class="ci" value="u" /> Blue</label>
+			<label><input type="checkbox" class="ci" value="b" /> Black</label>
+			<label><input type="checkbox" class="ci" value="r" /> Red</label>
+			<label><input type="checkbox" class="ci" value="g" /> Green</label>
 
-      <div class="muted">
-        “Exactly” means the random commander's color identity must be equal to the checked set (e.g. only {R} or exactly {U,B}, etc).
-        If nothing is checked, random is any color identity.
-      </div>
-    </fieldset>
+			<div class="muted">
+				“Exactly” means the random commander's color identity must be equal to
+				the checked set (e.g. only {R} or exactly {U,B}, etc). If nothing is
+				checked, random is any color identity.
+			</div>
+		</fieldset>
 
-    <div class="status" id="status"></div>
-    <img id="preview" alt="preview" />
-    <pre id="json"></pre>
+		<div class="status" id="status"></div>
+		<img id="preview" alt="preview" />
+		<pre id="json"></pre>
 
-    <script>
-      const DEFAULT_QUERY = "norin the wary";
-      const QR_HOST = "raspberrypi.local"; // IMPORTANT: resolves on other devices
+		<script>
+			const DEFAULT_QUERY = "norin the wary";
+			const BASE_URL = "http://{{ LOCAL_IP }}{{ DEV_PORT }}";
 
-      const playerEl = document.getElementById("player");
-      const qEl = document.getElementById("q");
-      const statusEl = document.getElementById("status");
-      const previewEl = document.getElementById("preview");
-      const jsonEl = document.getElementById("json");
+			const playerEl = document.getElementById("player");
+			const qEl = document.getElementById("q");
+			const statusEl = document.getElementById("status");
+			const previewEl = document.getElementById("preview");
+			const jsonEl = document.getElementById("json");
 
-      const qrCanvas = document.getElementById("qr");
-      const qrLabelEl = document.getElementById("qrLabel");
+			const qrCanvas = document.getElementById("qr");
+			const qrLabelEl = document.getElementById("qrLabel");
 
-      function setBusy(msg) {
-        statusEl.textContent = msg;
-        jsonEl.textContent = "";
-        previewEl.removeAttribute("src");
-      }
+			function setBusy(msg) {
+				statusEl.textContent = msg;
+				jsonEl.textContent = "";
+				previewEl.removeAttribute("src");
+			}
 
-      async function postJson(url, body) {
-        const r = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body || {}),
-        });
-        const data = await r.json().catch(() => ({}));
-        return { r, data };
-      }
+			async function postJson(url, body) {
+				const r = await fetch(url, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(body || {}),
+				});
+				const data = await r.json().catch(() => ({}));
+				return { r, data };
+			}
 
-      function selectedColors() {
-        return Array.from(document.querySelectorAll("input.ci:checked"))
-          .map(cb => cb.value)
-          .sort();
-      }
+			function selectedColors() {
+				return Array.from(document.querySelectorAll("input.ci:checked"))
+					.map((cb) => cb.value)
+					.sort();
+			}
 
-      function playerNum() {
-        return Number(playerEl.value || "1") || 1;
-      }
+			function playerNum() {
+				return Number(playerEl.value || "1") || 1;
+			}
 
-      function playerPath(p) {
-        if (p === 1) return "/face";
-        return `/player${p}`;
-      }
+			function playerPath(p) {
+				if (p === 1) return "/face";
+				return `/player${p}`;
+			}
 
-      function externalBaseUrl() {
-        // Keep current protocol (http vs https) + current port if present
-        const proto = location.protocol || "http:";
-        const port = location.port ? `:${location.port}` : "";
-        return `${proto}//${QR_HOST}${port}`;
-      }
+			function externalBaseUrl() {
+				return BASE_URL;
+			}
 
-      // --- QR code helpers ---
-      async function loadQrLib() {
-        const src = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
-        await new Promise((resolve, reject) => {
-          const s = document.createElement("script");
-          s.src = src;
-          s.onload = resolve;
-          s.onerror = () => reject(new Error("Failed to load QR library"));
-          document.head.appendChild(s);
-        });
-      }
+			// --- QR code helpers ---
+			async function loadQrLib() {
+				const src =
+					"https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
+				await new Promise((resolve, reject) => {
+					const s = document.createElement("script");
+					s.src = src;
+					s.onload = resolve;
+					s.onerror = () => reject(new Error("Failed to load QR library"));
+					document.head.appendChild(s);
+				});
+			}
 
-      function drawQrToCanvas(text, canvas) {
-        const qr = window.qrcode(0, "M");
-        qr.addData(text);
-        qr.make();
+			function drawQrToCanvas(text, canvas) {
+				const qr = window.qrcode(0, "M");
+				qr.addData(text);
+				qr.make();
 
-        const ctx = canvas.getContext("2d");
-        const count = qr.getModuleCount();
-        const size = canvas.width;
-        const scale = Math.floor(size / count);
-        const offset = Math.floor((size - count * scale) / 2);
+				const ctx = canvas.getContext("2d");
+				const count = qr.getModuleCount();
+				const size = canvas.width;
+				const scale = Math.floor(size / count);
+				const offset = Math.floor((size - count * scale) / 2);
 
-        ctx.fillStyle = "#fff";
-        ctx.fillRect(0, 0, size, size);
+				ctx.fillStyle = "#fff";
+				ctx.fillRect(0, 0, size, size);
 
-        ctx.fillStyle = "#000";
-        for (let r = 0; r < count; r++) {
-          for (let c = 0; c < count; c++) {
-            if (qr.isDark(r, c)) {
-              ctx.fillRect(offset + c * scale, offset + r * scale, scale, scale);
-            }
-          }
-        }
-      }
+				ctx.fillStyle = "#000";
+				for (let r = 0; r < count; r++) {
+					for (let c = 0; c < count; c++) {
+						if (qr.isDark(r, c)) {
+							ctx.fillRect(
+								offset + c * scale,
+								offset + r * scale,
+								scale,
+								scale,
+							);
+						}
+					}
+				}
+			}
 
-      let qrLibPromise = null;
-      function ensureQrLib() {
-        if (!qrLibPromise) qrLibPromise = loadQrLib();
-        return qrLibPromise;
-      }
+			let qrLibPromise = null;
+			function ensureQrLib() {
+				if (!qrLibPromise) qrLibPromise = loadQrLib();
+				return qrLibPromise;
+			}
 
-      async function renderPlayerQr() {
-        const p = playerNum();
-        const url = `${externalBaseUrl()}${playerPath(p)}`;
+			async function renderPlayerQr() {
+				const p = playerNum();
+				const url = `${externalBaseUrl()}${playerPath(p)}`;
 
-        qrLabelEl.textContent = url;
+				qrLabelEl.textContent = url;
 
-        try {
-          await ensureQrLib();
-          drawQrToCanvas(url, qrCanvas);
-          qrCanvas.style.display = "block";
-        } catch (e) {
-          const ctx = qrCanvas.getContext("2d");
-          ctx.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
-          qrCanvas.style.display = "none";
-        }
-      }
+				try {
+					await ensureQrLib();
+					drawQrToCanvas(url, qrCanvas);
+					qrCanvas.style.display = "block";
+				} catch (e) {
+					const ctx = qrCanvas.getContext("2d");
+					ctx.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
+					qrCanvas.style.display = "none";
+				}
+			}
 
-      playerEl.addEventListener("change", () => {
-        renderPlayerQr();
-      });
+			playerEl.addEventListener("change", () => {
+				renderPlayerQr();
+			});
 
-      // --- Actions ---
-      async function doSearch(query) {
-        const q = (query || "").trim();
-        if (!q) return;
+			// --- Actions ---
+			async function doSearch(query) {
+				const q = (query || "").trim();
+				if (!q) return;
 
-        const p = playerNum();
-        setBusy(`Searching Scryfall for "${q}" (player ${p})...`);
-        const { r, data } = await postJson(`/api/search/${p}`, { q });
+				const p = playerNum();
+				setBusy(`Searching Scryfall for "${q}" (player ${p})...`);
+				const { r, data } = await postJson(`/api/search/${p}`, { q });
 
-        jsonEl.textContent = JSON.stringify(data, null, 2);
-        if (!r.ok) { statusEl.textContent = "Error (see JSON below)"; return; }
+				jsonEl.textContent = JSON.stringify(data, null, 2);
+				if (!r.ok) {
+					statusEl.textContent = "Error (see JSON below)";
+					return;
+				}
 
-        statusEl.textContent = `Player ${p} now showing: ${data.name}`;
-        previewEl.src = data.border_crop_url;
-      }
+				statusEl.textContent = `Player ${p} now showing: ${data.name}`;
+				previewEl.src = data.border_crop_url;
+			}
 
-      async function doRandomCommander() {
-        const colors = selectedColors();
-        const p = playerNum();
+			async function doRandomCommander() {
+				const colors = selectedColors();
+				const p = playerNum();
 
-        const label = colors.length ? ` (exact id=${colors.join("")})` : "";
-        setBusy(`Getting random commander${label} (player ${p})...`);
+				const label = colors.length ? ` (exact id=${colors.join("")})` : "";
+				setBusy(`Getting random commander${label} (player ${p})...`);
 
-        const { r, data } = await postJson(`/api/random/${p}`, {
-          colors,
-          identity_match: "exact",
-          mode: "commander",
-        });
+				const { r, data } = await postJson(`/api/random/${p}`, {
+					colors,
+					identity_match: "exact",
+					mode: "commander",
+				});
 
-        jsonEl.textContent = JSON.stringify(data, null, 2);
-        if (!r.ok) { statusEl.textContent = "Error (see JSON below)"; return; }
+				jsonEl.textContent = JSON.stringify(data, null, 2);
+				if (!r.ok) {
+					statusEl.textContent = "Error (see JSON below)";
+					return;
+				}
 
-        statusEl.textContent = `Player ${p} now showing (random commander): ${data.name}`;
-        previewEl.src = data.border_crop_url;
-      }
+				statusEl.textContent = `Player ${p} now showing (random commander): ${data.name}`;
+				previewEl.src = data.border_crop_url;
+			}
 
-      document.getElementById("searchBtn").addEventListener("click", () => doSearch(qEl.value));
-      document.getElementById("randomBtn").addEventListener("click", () => doRandomCommander());
-      qEl.addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(qEl.value); });
+			document
+				.getElementById("searchBtn")
+				.addEventListener("click", () => doSearch(qEl.value));
+			document
+				.getElementById("randomBtn")
+				.addEventListener("click", () => doRandomCommander());
+			qEl.addEventListener("keydown", (e) => {
+				if (e.key === "Enter") doSearch(qEl.value);
+			});
 
-      // initial
-      renderPlayerQr();
-      qEl.value = DEFAULT_QUERY;
-      doSearch(DEFAULT_QUERY);
-    </script>
-  </body>
+			// initial
+			renderPlayerQr();
+			qEl.value = DEFAULT_QUERY;
+			doSearch(DEFAULT_QUERY);
+		</script>
+	</body>
 </html>
