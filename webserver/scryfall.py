@@ -493,14 +493,14 @@ def _parse_mtgjson_slots(booster_data: dict) -> list[dict]:
         for sheet_name, count in contents.items():
             sheet_meta = sheets.get(sheet_name, {})
             is_foil = bool(sheet_meta.get("foil", False))
-            slot_type = "foil" if is_foil else _classify_sheet(sheet_name)
+            slot_type = _classify_sheet(sheet_name)  # NOT "foil" if is_foil
 
             key = (slot_type, is_foil)
             if key not in slot_totals:
                 slot_totals[key] = {
-                    "type":  slot_type,
+                    "type":  slot_type,   # "common", "uncommon", "rare", "land" — used for /api/booster/single
                     "count": 0,
-                    "foil":  is_foil,
+                    "foil":  is_foil,     # true = apply foil effect in frontend
                     "label": _SLOT_LABELS.get(slot_type, slot_type.capitalize()),
                 }
             slot_totals[key]["count"] += count
@@ -526,7 +526,7 @@ def _parse_mtgjson_slots(booster_data: dict) -> list[dict]:
                 # Classify by the highest-weight non-foil sheet name for label/type
                 non_foil = [(name, w) for name, w in deck if "foil" not in name.lower()]
                 primary = max(non_foil, key=lambda x: x[1])[0] if non_foil else deck[0][0]
-                slot_type = "foil" if foil_prob >= 1.0 else _classify_sheet(primary)
+                slot_type = _classify_sheet(primary)   # was: "foil" if foil_prob >= 1.0 else _classify_sheet(primary)
                 is_foil = foil_prob >= 1.0
             else:
                 # Fixed slot: deck is a sheet name string
