@@ -2,6 +2,7 @@
 pico/sd
 webserver/cache
 pico/secrets.py
+pico/Pico-Eval-Board-Code
 
 # Python virtual environment
 webserver/.venv/
