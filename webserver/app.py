@@ -1,4 +1,5 @@
 import io
+import os
 import sys
 import socket
 import threading
@@ -6,7 +7,6 @@ import urllib.parse
 from datetime import date
 
 from flask import Flask, render_template, request, jsonify, send_file
-import os
 
 import cache as _cache_module
 import images as _images_module
@@ -30,14 +30,33 @@ from scryfall import (
 import random
 import time
 
+# ---- Load .env (if present) ----------------------------------------
+# Handles dev runs where HOST/PORT/DEV_PORT are not injected by systemd.
+# Uses os.environ.setdefault so that real environment variables (e.g. from
+# the systemd service's Environment= lines) always take precedence.
+_env_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.isfile(_env_path):
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _, _v = _line.partition("=")
+                os.environ.setdefault(_k.strip(), _v.strip())
+
+# ---- Config from environment ---------------------------------------
+# DEV_PORT: appended to URLs in templates / QR codes.
+#   ":8000"  → direct Flask access (dev, no nginx)
+#   ""       → nginx on port 80 (production Pi)
+DEV_PORT: str = os.environ.get("DEV_PORT", ":8000")
+
+HOST: str = os.environ.get("HOST", "0.0.0.0")
+PORT: int = int(os.environ.get("PORT", 8000))
+# --------------------------------------------------------------------
+
 app = Flask(__name__)
 
 CARD_BACK_PATH = os.path.join(os.path.dirname(__file__), "cardback.jpg")
 CARD_BACK_WEB_URL = "/cardback.jpg"
-
-# Port suffix — use ":8000" for dev, comment out (set to "") for prod on port 80
-DEV_PORT = ":8000"
-# DEV_PORT = ""
 
 EXCLUDED_SET_CODES = {
     "pred",
@@ -51,6 +70,7 @@ EXCLUDED_SET_CODES = {
 # Wire path/URL constants into submodules
 _images_module.CARD_BACK_PATH = CARD_BACK_PATH
 _images_module.CARD_BACK_WEB_URL = CARD_BACK_WEB_URL
+_images_module.CONFIG_PORT = DEV_PORT
 
 # Pre-generate fallback BMPs at startup
 _CONFIG_PROMPT_BMP, _CARD_BACK_BMP = init_fallback_bmps(CARD_BACK_PATH)
@@ -461,5 +481,5 @@ if __name__ == "__main__":
     with _cache_lock:
         _cleanup_old_cache()
 
-    _print_endpoints("0.0.0.0", 8000)
-    app.run(host="0.0.0.0", port=8000, debug=False)
+    _print_endpoints(HOST, PORT)
+    app.run(host=HOST, port=PORT, debug=False)
