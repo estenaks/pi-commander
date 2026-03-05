@@ -80,10 +80,18 @@
 				aspect-ratio: 63/88;
 				border: 2px solid #444;
 				border-radius: 12px;
-				overflow: hidden;
+				overflow: visible; /* was hidden — needed so scaled card overflows grid */
 				background: #2a2a2a;
 				position: relative;
-				transition: all 0.3s ease;
+				transition:
+					transform 0.25s ease,
+					box-shadow 0.25s ease,
+					z-index 0s;
+			}
+			.card-slot.expanded {
+				transform: scale(1.18);
+				z-index: 10;
+				box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7);
 			}
 			.card-slot.loading {
 				background: linear-gradient(45deg, #2a2a2a, #3a3a3a, #2a2a2a);
@@ -93,6 +101,14 @@
 			.card-slot.loaded {
 				border-color: #4caf50;
 				transform: scale(1.02);
+			}
+			.card-slot.expanded .card-rarity {
+				opacity: 0;
+				transition: opacity 0.2s ease;
+			}
+			.card-rarity {
+				opacity: 1;
+				transition: opacity 0.2s ease;
 			}
 			@keyframes shimmer {
 				0% {
@@ -766,6 +782,34 @@
 						cardSlot.dataset.faceIndex = String(nextIndex);
 					});
 				}
+				// --- Expand on hover (mouse) / tap (touch) ---
+				let expandTimeout = null;
+
+				cardSlot.addEventListener("pointerenter", (e) => {
+					if (e.pointerType === "mouse") {
+						cardSlot.classList.add("expanded");
+					}
+				});
+
+				cardSlot.addEventListener("pointerleave", (e) => {
+					if (e.pointerType === "mouse") {
+						cardSlot.classList.remove("expanded");
+					}
+				});
+
+				cardSlot.addEventListener("pointerdown", (e) => {
+					if (e.pointerType !== "mouse") {
+						// Touch: toggle expand; collapse any other expanded card first
+						const wasExpanded = cardSlot.classList.contains("expanded");
+						document.querySelectorAll(".card-slot.expanded").forEach((el) => {
+							el.classList.remove("expanded");
+						});
+						if (!wasExpanded) {
+							cardSlot.classList.add("expanded");
+							e.stopPropagation(); // prevent the click from also flipping the card
+						}
+					}
+				});
 				cardSlot.addEventListener("click", () => {
 					if (
 						img.classList.contains("flipping-out") ||
@@ -785,6 +829,14 @@
 					}
 				});
 			}
+			
+			document.addEventListener("pointerdown", (e) => {
+				if (!e.target.closest(".card-slot")) {
+					document.querySelectorAll(".card-slot.expanded").forEach((el) => {
+						el.classList.remove("expanded");
+					});
+				}
+			});
 
 			function updateProgress(message) {
 				// const progressDiv = document.getElementById('progress');
