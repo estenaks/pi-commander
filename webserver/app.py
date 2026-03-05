@@ -25,6 +25,7 @@ from scryfall import (
     _select_random_cards_from_pool,
     _get_rare_or_mythic_card_from_set,
     _get_common_land_from_set,
+    _get_booster_config,
 )
 import random
 import time
@@ -44,8 +45,7 @@ EXCLUDED_SET_CODES = {
     "phtr",
     "punk",
     "klr",
-    "h2r",
-    "sis"
+    "h2r"
 }
 
 # Wire path/URL constants into submodules
@@ -163,6 +163,37 @@ def api_booster_sets():
         return jsonify({"error": str(e)}), 500
 
 
+@app.get("/api/booster/config/<set_code>")
+def api_booster_config(set_code: str):
+    """
+    Return a parsed, frontend-ready booster config for a set drawn from MTGJSON.
+
+    Response shape:
+    {
+      "slots": [
+        { "type": "common",      "count": 10, "foil": false, "label": "Common" },
+        { "type": "uncommon",    "count": 3,  "foil": false, "label": "Uncommon" },
+        { "type": "rare",        "count": 1,  "foil": false, "label": "Rare" },
+        { "type": "land",        "count": 1,  "foil": false, "label": "Land" },
+        { "type": "foil",        "count": 1,  "foil": true,  "foil_probability": 1.0, "label": "✨" },
+        { "type": "timeshifted", "count": 1,  "foil": false, "label": "Timeshifted" },
+        ...
+      ],
+      "source": "mtgjson" | "fallback"
+    }
+
+    Slot types map directly to the rarity keys used by /api/booster/single:
+      "common" | "uncommon" | "rare" | "land" | "any" (foil) | "timeshifted" (treated as "any")
+    """
+    set_code = set_code.strip().lower()
+    try:
+        config = _get_booster_config(set_code)
+        return jsonify(config)
+    except Exception as e:
+        print(f"[booster] Error fetching booster config for {set_code}: {e}", file=sys.stderr)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.post("/api/booster/single")
 def api_booster_single_card():
     """Get a single random card for progressive pack generation."""
@@ -201,13 +232,14 @@ def api_booster_single_card():
             print(f"[booster] Selected land card in {fetch_time:.3f}s: {card['name']}")
             return jsonify({"card": card, "from_cache": True, "fetch_time": round(fetch_time, 3)})
 
-        if rarity == "any":
+        # "any" covers foil slots and special slots (timeshifted etc.) — pull from full pool
+        if rarity in ("any", "timeshifted"):
             available = [card for card in set_cards if card["id"] not in exclude_ids]
             if not available:
                 return jsonify({"error": f"No available cards for set {set_code}"}), 404
             card = random.choice(available)
             fetch_time = time.time() - start_time
-            print(f"[booster] Selected premium card in {fetch_time:.3f}s: {card['name']} ({card['rarity']})")
+            print(f"[booster] Selected {rarity} card in {fetch_time:.3f}s: {card['name']} ({card['rarity']})")
             return jsonify({"card": card, "from_cache": True, "fetch_time": round(fetch_time, 3)})
 
         rarity_pool = _get_cards_by_rarity_from_set(set_cards, rarity)
@@ -420,6 +452,7 @@ def _print_endpoints(host: str, port: int) -> None:
         f"    POST {base}/api/search/<player>",
         f"    POST {base}/api/random/<player>",
         f"    GET  {base}/api/booster/sets",
+        f"    GET  {base}/api/booster/config/<set_code>",
         f"    POST {base}/api/booster/single",
         f"    POST {base}/api/send/<player>",
         "",
