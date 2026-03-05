@@ -4,6 +4,8 @@
     <meta charset="utf-8" />
     <title>Face</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="/static/card-flip.css">
+    <link rel="stylesheet" href="/static/premium-effects.css">
     <style>
       :root { --bg:#000; --punch-x:0.03; --punch-y:0.03; }
       html, body { height:100%; margin:0; background:var(--bg); overflow:hidden; }
@@ -20,6 +22,17 @@
         object-fit: fill; display:block;
         transform-origin:center center;
         transform: scale(calc(1 + (2 * var(--punch-x))), calc(1 + (2 * var(--punch-y))));
+      }
+
+      /* Override card-flip.css keyframes to include the punch overscale,
+        so the flip animation never collapses to natural (unscaled) size mid-flip. */
+      @keyframes cardFlipOut {
+          from { transform: scale(calc(1 + (2 * var(--punch-x))), calc(1 + (2 * var(--punch-y)))) scaleX(1); }
+          to   { transform: scale(calc(1 + (2 * var(--punch-x))), calc(1 + (2 * var(--punch-y)))) scaleX(0); }
+      }
+      @keyframes cardFlipIn {
+          from { transform: scale(calc(1 + (2 * var(--punch-x))), calc(1 + (2 * var(--punch-y)))) scaleX(0); }
+          to   { transform: scale(calc(1 + (2 * var(--punch-x))), calc(1 + (2 * var(--punch-y)))) scaleX(1); }
       }
 
       #clickCatcher { position:absolute; inset:0; z-index:2; cursor:pointer; pointer-events:auto; background:transparent; }
@@ -81,8 +94,6 @@
         opacity: 0.95;
       }
     </style>
-    <link rel="stylesheet" href="/static/card-flip.css">
-    <link rel="stylesheet" href="/static/premium-effects.css">
   </head>
   <body>
     <div class="stage">
