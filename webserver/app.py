@@ -3,6 +3,7 @@ import sys
 import socket
 import threading
 import urllib.parse
+from datetime import date
 
 from flask import Flask, render_template, request, jsonify, send_file
 import os
@@ -127,11 +128,21 @@ def api_booster_sets():
 
         sets_data = _get_all_sets()
 
+        today = date.today()
         eligible_sets = []
         for set_data in sets_data:
             set_type = set_data.get("set_type", "")
             set_code = set_data.get("code", "").lower()
             set_name = set_data.get("name", "").lower()
+            released_at = set_data.get("released_at", "")
+
+            # Skip sets not yet released
+            if released_at:
+                try:
+                    if date.fromisoformat(released_at) > today:
+                        continue
+                except ValueError:
+                    pass  # malformed date — allow through
 
             if set_code in EXCLUDED_SET_CODES:
                 continue
