@@ -19,3 +19,7 @@ pip-delete-this-directory.txt
 *.egg-info/
 dist/
 build/
+
+# Local environment — never commit credentials
+webserver/.env
+.env
