@@ -34,10 +34,11 @@ import network
 import urequests
 from machine import Pin, SPI, PWM
 
-# ---- User config ----
-WIFI_SSID = "your-ssid"
-WIFI_PASS = "your-password"
-SERVER    = "http://raspberrypi.local"  # or bare IP
+# ---- User config (loaded from secrets.py — not in repo) ----
+try:
+    from secrets import WIFI_SSID, WIFI_PASS, SERVER
+except ImportError:
+    raise RuntimeError("Missing secrets.py on Pico! See pico/secrets.py.example in the repo.")
 
 # ---- Display — ILI9488, SPI1 — verify pins! ----
 LCD_SPI  = 1

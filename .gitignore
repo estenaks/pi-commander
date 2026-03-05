@@ -1,6 +1,7 @@
 .DS_Store
 pico/sd
 webserver/cache
+pico/secrets.py
 
 # Python virtual environment
 webserver/.venv/

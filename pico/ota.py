@@ -4,15 +4,16 @@ import time
 import machine
 import os
 
-# ---- Config ----
-WIFI_SSID     = "your-ssid"       # same as main.py
-WIFI_PASS     = "your-password"
-SERVER        = "http://192.168.1.xx"  # Pi's IP — no .local
+# ---- Config (loaded from secrets.py — not in repo) ----
+try:
+    from secrets import WIFI_SSID, WIFI_PASS, SERVER
+except ImportError:
+    raise RuntimeError("Missing secrets.py on Pico! See pico/secrets.py.example in the repo.")
 
 OTA_VERSION_URL = SERVER + "/ota/version"
 OTA_SOURCE_URL  = SERVER + "/ota/main.py"
 OTA_SHA_FILE    = "/ota_sha.txt"
-# ----------------
+# --------------------------------------------------------
 
 
 def _connect_wifi():
