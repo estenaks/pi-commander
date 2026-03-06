@@ -643,6 +643,13 @@
 			}
 
 			// ── Single-card fetch ─────────────────────────────────────────────────────
+			//
+			// Accepts a full slot descriptor.  Extra fields forwarded to backend:
+			//   subtype  – "mb2_main" | "mb2_frame" | "mb2_border" | "mb2_test"
+			//   color    – colour-bucket filter
+			//   cn_min   – collector-number lower bound
+			//   cn_max   – collector-number upper bound
+			//
 			async function fetchSingleCard(slot, usedCardIds = new Set()) {
 				const setCode  = typeof slot === "string" ? slot : slot.setCode;
 				const rarity   = typeof slot === "string" ? "common" : (slot.apiRarity || "any");
@@ -679,8 +686,16 @@
 
 					const card = data.card;
 
+					// Re-roll basic lands out of plain common slots (no active filters)
 					if (!subtype && !color && rarity === "common" && card.is_common_land) {
 						console.log(`Re-rolling land: ${card.name} (attempt ${attempt + 1})`);
+						usedCardIds.add(card.id);
+						continue;
+					}
+
+					// Re-roll Arena Alchemy / Rebalanced cards — they carry an "A-" name prefix
+					if (card.name.startsWith("A-")) {
+						console.log(`Re-rolling Arena card: ${card.name} (attempt ${attempt + 1})`);
 						usedCardIds.add(card.id);
 						continue;
 					}
