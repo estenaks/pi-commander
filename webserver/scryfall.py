@@ -381,6 +381,7 @@ def _get_cu_from_pool(pool: list[dict]) -> list[dict]:
 
 
 def _get_cards_by_color_from_set(pool: list[dict], color_bucket: str) -> list[dict]:
+    color_bucket = color_bucket.upper() if len(color_bucket) == 1 else color_bucket.lower()
     return [c for c in pool if c.get("color_bucket") == color_bucket]
 
 

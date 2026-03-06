@@ -193,7 +193,7 @@ def api_booster_single_card():
         set_code    = payload.get("set_code", "").strip().lower()
         rarity      = payload.get("rarity",   "").strip().lower()
         exclude_ids = set(payload.get("exclude_ids", []))
-        color       = (payload.get("color")   or "").strip().lower()
+        color       = (payload.get("color")   or "").strip()
         cn_min      = payload.get("cn_min")   # int or None
         cn_max      = payload.get("cn_max")   # int or None
         subtype     = (payload.get("subtype") or "").strip().lower()
