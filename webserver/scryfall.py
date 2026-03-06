@@ -16,7 +16,7 @@ from cache import (
 )
 from images import CARD_BACK_WEB_URL, _any_to_bmp
 
-SCRYFALL_REQUEST_DELAY = 0.050  # 50ms delay between requests
+SCRYFALL_REQUEST_DELAY = 0.050  # 50ms between requests
 
 PLAYERS = [1, 2, 3, 4]
 
@@ -27,20 +27,19 @@ _state_by_player = {
         "card_id": None,
         "faces_meta": [],
         "border_crop_url": None,
-        "premium": None,   # e.g. "foil" etc, or None
+        "premium": None,
     }
     for p in PLAYERS
 }
 
-# BMP cache: keyed by (player, face) where face is "front" or "back"
-# Protected by _state_lock
 _bmp_cache: dict[tuple[int, str], bytes] = {}
 
 
-# ---- Scryfall HTTP ----
+# ---------------------------------------------------------------------------
+# Scryfall HTTP
+# ---------------------------------------------------------------------------
 
 def _scryfall_get(url: str, use_cache: bool = False, cache_key: str = None, cache_hours: int = 24) -> dict:
-    """Make a GET request to Scryfall with optional caching."""
     if use_cache and cache_key:
         with _cache_lock:
             cached_data = _get_cached_data(cache_key, cache_hours)
@@ -81,7 +80,9 @@ def _scryfall_get(url: str, use_cache: bool = False, cache_key: str = None, cach
         raise RuntimeError(f"Scryfall request failed: {type(e).__name__}: {e}") from e
 
 
-# ---- Card image helpers ----
+# ---------------------------------------------------------------------------
+# Card image helpers
+# ---------------------------------------------------------------------------
 
 def _pick_image_border_crop_only(iu: dict) -> str:
     if not isinstance(iu, dict):
@@ -101,13 +102,10 @@ def _extract_faces_meta_always_two(card: dict) -> list[dict]:
     if isinstance(faces, list) and len(faces) >= 2:
         f0 = faces[0] or {}
         f1 = faces[1] or {}
-
         u0 = _pick_image_border_crop_only((f0.get("image_uris") or {}))
         u1 = _pick_image_border_crop_only((f1.get("image_uris") or {}))
-
         tl0 = f0.get("type_line") if isinstance(f0.get("type_line"), str) else ""
         tl1 = f1.get("type_line") if isinstance(f1.get("type_line"), str) else ""
-
         if u0:
             if not u1:
                 u1 = u0
@@ -140,7 +138,9 @@ def _extract_border_crop(card: dict) -> str:
     return ""
 
 
-# ---- Player state ----
+# ---------------------------------------------------------------------------
+# Player state
+# ---------------------------------------------------------------------------
 
 def _require_player(player: int) -> int:
     if player not in _state_by_player:
@@ -149,7 +149,6 @@ def _require_player(player: int) -> int:
 
 
 def _generate_bmps(player: int) -> None:
-    """Generate and cache BMP images for both faces of *player*'s current card."""
     with _state_lock:
         faces_meta = list(_state_by_player[player]["faces_meta"])
         card_id = _state_by_player[player]["card_id"]
@@ -197,10 +196,12 @@ def _set_player_state(player: int, *, last_query: str, card: dict, premium: str 
     return result
 
 
-# ---- Booster helpers ----
+# ---------------------------------------------------------------------------
+# Generic set helpers
+# ---------------------------------------------------------------------------
 
 def _get_all_sets() -> list[dict]:
-    """Get all Magic sets from Scryfall with 1-day caching."""
+    """Return all Magic sets from Scryfall (1-day cache)."""
     return _scryfall_get(
         "https://api.scryfall.com/sets",
         use_cache=True,
@@ -210,13 +211,7 @@ def _get_all_sets() -> list[dict]:
 
 
 def _classify_color(colors: list[str], type_line: str) -> str:
-    """
-    Classify a card into one of the Mystery Booster colour-slot buckets:
-      "W" | "U" | "B" | "R" | "G" | "multi" | "colorless" | "land"
-
-    Lands (basic and non-basic) get their own bucket so they can be targeted
-    by the MB1/MB2 land slot without also appearing in colour slots.
-    """
+    """Map a card to its Mystery Booster colour bucket."""
     if "Land" in type_line:
         return "land"
     if len(colors) > 1:
@@ -226,90 +221,97 @@ def _classify_color(colors: list[str], type_line: str) -> str:
     return "colorless"
 
 
-def _get_full_set_data(set_code: str) -> list[dict]:
-    """Get all cards from a set, with permanent caching.
+def _build_card_record(card: dict, set_code: str) -> dict | None:
+    """Convert a raw Scryfall card object into our cached dict format.
 
-    Each cached card dict now includes two extra fields used for Mystery
-    Booster filtering:
-      - "color_bucket": one of "W","U","B","R","G","multi","colorless","land"
-      - "frame":        Scryfall frame string, e.g. "future", "2015", "1993" …
-      - "border_color": Scryfall border_color string, e.g. "white", "black" …
+    Returns None if the card has no usable image.
     """
-    cache_key = f"set_{set_code}_full"
+    rarity = card.get("rarity", "")
+    if rarity not in ["common", "uncommon", "rare", "mythic"]:
+        return None
 
+    type_line = card.get("type_line", "")
+    colors = card.get("colors") or []
+
+    if card.get("image_uris"):
+        front_url = _pick_image_border_crop_only(card["image_uris"])
+        back_url = None
+    elif card.get("card_faces") and len(card["card_faces"]) >= 2:
+        f0 = card["card_faces"][0]
+        f1 = card["card_faces"][1]
+        front_url = _pick_image_border_crop_only(f0.get("image_uris") or {})
+        back_url = _pick_image_border_crop_only(f1.get("image_uris") or {})
+        if not colors:
+            colors = f0.get("colors") or []
+    else:
+        return None
+
+    if not front_url:
+        return None
+
+    # collector_number: Scryfall returns it as a string ("123", "123a", etc.)
+    # Store the raw string AND an integer version for range filtering.
+    cn_str = card.get("collector_number", "")
+    try:
+        cn_int = int("".join(c for c in cn_str if c.isdigit()) or "0")
+    except ValueError:
+        cn_int = 0
+
+    return {
+        "id":              card.get("id"),
+        "name":            card.get("name", "Unknown"),
+        "image_url":       front_url,
+        "back_image_url":  back_url,
+        "rarity":          rarity,
+        "set":             set_code,
+        "mana_cost":       card.get("mana_cost", ""),
+        "type_line":       type_line,
+        "is_common_land":  (rarity == "common" and "Land" in type_line),
+        "color_bucket":    _classify_color(colors, type_line),
+        "frame":           card.get("frame", ""),
+        "border_color":    card.get("border_color", ""),
+        "collector_number": cn_int,
+    }
+
+
+def _fetch_all_pages(scryfall_query: str, cache_key: str) -> list[dict]:
+    """Download every page of a Scryfall search query and cache the result.
+
+    *scryfall_query* is the raw q= value (will be URL-encoded here).
+    """
     with _cache_lock:
-        cached_set = _get_cached_data(cache_key, cache_hours=24 * CACHE_EXPIRY_DAYS)
-        if cached_set is not None:
-            return cached_set
+        cached = _get_cached_data(cache_key, cache_hours=24 * CACHE_EXPIRY_DAYS)
+        if cached is not None:
+            return cached
 
-    print(f"[booster] 📦 DOWNLOADING: Fetching full set data for {set_code}...")
-    all_cards = []
+    print(f"[booster] 📦 DOWNLOADING: query={scryfall_query!r} ...")
+    all_cards: list[dict] = []
     page = 1
 
     while True:
         try:
-            url = f"https://api.scryfall.com/cards/search?q=set:{set_code}&page={page}"
-            print(f"[booster] Fetching page {page} for set {set_code}...")
+            params = urllib.parse.urlencode({"q": scryfall_query, "page": page})
+            url = f"https://api.scryfall.com/cards/search?{params}"
+            print(f"[booster]   page {page} ...")
             time.sleep(SCRYFALL_REQUEST_DELAY)
             response = _scryfall_get(url, use_cache=False)
 
-            cards_data = response.get("data", [])
-            if not cards_data:
-                break
-
-            for card in cards_data:
-                rarity = card.get("rarity", "")
-                if rarity not in ["common", "uncommon", "rare", "mythic"]:
-                    continue
-
-                type_line = card.get("type_line", "")
-                colors    = card.get("colors") or []
-
-                if card.get("image_uris"):
-                    front_url = _pick_image_border_crop_only(card.get("image_uris", {}))
-                    back_url  = None
-                elif card.get("card_faces") and len(card["card_faces"]) >= 2:
-                    f0 = card["card_faces"][0]
-                    f1 = card["card_faces"][1]
-                    front_url = _pick_image_border_crop_only(f0.get("image_uris") or {})
-                    back_url  = _pick_image_border_crop_only(f1.get("image_uris") or {})
-                    # DFCs: use face 0 colours if top-level colours list is absent
-                    if not colors:
-                        colors = f0.get("colors") or []
-                else:
-                    continue
-
-                if not front_url:
-                    continue
-
-                all_cards.append({
-                    "id":            card.get("id"),
-                    "name":          card.get("name", "Unknown"),
-                    "image_url":     front_url,
-                    "back_image_url": back_url,
-                    "rarity":        rarity,
-                    "set":           set_code,
-                    "mana_cost":     card.get("mana_cost", ""),
-                    "type_line":     type_line,
-                    "is_common_land": (rarity == "common" and "Land" in type_line),
-                    # ── new fields ──────────────────────────────────────────
-                    "color_bucket":  _classify_color(colors, type_line),
-                    "frame":         card.get("frame", ""),
-                    "border_color":  card.get("border_color", ""),
-                })
+            for raw in response.get("data", []):
+                rec = _build_card_record(raw, raw.get("set", ""))
+                if rec:
+                    all_cards.append(rec)
 
             if not response.get("has_more", False):
                 break
-
             page += 1
 
         except Exception as e:
-            print(f"[booster] Error fetching page {page} for set {set_code}: {e}")
+            print(f"[booster] Error on page {page}: {e}")
             if page == 1:
                 return []
             break
 
-    print(f"[booster] ✅ DOWNLOADED: Set {set_code} complete ({len(all_cards)} cards)")
+    print(f"[booster] ✅ Done ({len(all_cards)} cards)")
 
     with _cache_lock:
         _set_cached_data(cache_key, all_cards)
@@ -317,111 +319,121 @@ def _get_full_set_data(set_code: str) -> list[dict]:
     return all_cards
 
 
-def _get_cards_by_rarity_from_set(set_cards: list[dict], rarity: str) -> list[dict]:
-    """Filter cards by rarity from a complete set."""
-    return [card for card in set_cards if card.get("rarity") == rarity]
+def _get_full_set_data(set_code: str) -> list[dict]:
+    """Fetch every card in a regular Scryfall set."""
+    return _fetch_all_pages(
+        scryfall_query=f"set:{set_code}",
+        cache_key=f"set_{set_code}_full",
+    )
 
 
-def _get_cards_by_color_from_set(set_cards: list[dict], color_bucket: str) -> list[dict]:
-    """Filter cards by colour bucket (W/U/B/R/G/multi/colorless/land).
+# ---------------------------------------------------------------------------
+# Mystery Booster 2 – virtual pools
+# ---------------------------------------------------------------------------
+#
+# MB2 has three conceptually separate card pools:
+#
+#   mb2_main   – The List reprints printed for MB2 (e:plst date=2024-08-02).
+#                These fill the 10 C/U colour slots, the multi/artifact/land
+#                slot, and the rare/mythic slot.
+#
+#   mb2_frame  – Future Sight frame cards inside the physical MB2 set
+#                (e:mb2 cn<=242).  The cn ranges overlap two sub-pools:
+#                  cn 122-143  non-foil C/U frame cards
+#                  cn 144-242  foil-able frame cards (any rarity)
+#                  cn 243-264  foil-exclusive frame cards (always foil)
+#
+#   mb2_border – White-bordered reprints (e:mb2 cn<=121, border:white).
+#
+#   mb2_test   – Playtest cards (e:mb2 cn>=265).
+#
 
-    Mystery Booster colour slots exclude lands — the land slot is separate.
-    When filtering for a colour (W-G / multi / colorless), lands are excluded
-    so they can only appear via the dedicated land slot.
-    When color_bucket == "land", returns only land cards regardless of rarity.
+def _get_mb2_main_pool() -> list[dict]:
+    """The List cards printed in MB2 (e:plst date=2024-08-02)."""
+    return _fetch_all_pages(
+        scryfall_query="e:plst date=2024-08-02",
+        cache_key="mb2_main_pool",
+    )
+
+
+def _get_mb2_physical_pool() -> list[dict]:
+    """All cards physically printed in the MB2 set (e:mb2).
+
+    Used for frame, white-border, and playtest slots.
     """
-    return [card for card in set_cards if card.get("color_bucket") == color_bucket]
+    return _fetch_all_pages(
+        scryfall_query="e:mb2",
+        cache_key="mb2_physical_pool",
+    )
 
 
-def _get_cards_by_frame_from_set(set_cards: list[dict], frame: str) -> list[dict]:
-    """Filter cards by Scryfall frame tag, e.g. 'future'.
+# ---------------------------------------------------------------------------
+# Filtering helpers
+# ---------------------------------------------------------------------------
 
-    Used for the MB2 Future Sight frame slot.
-    """
-    return [card for card in set_cards if card.get("frame") == frame]
-
-
-def _get_cards_by_border_from_set(set_cards: list[dict], border_color: str) -> list[dict]:
-    """Filter cards by Scryfall border_color, e.g. 'white'.
-
-    Used for the MB2 white-bordered card slot.
-    """
-    return [card for card in set_cards if card.get("border_color") == border_color]
+def _get_cards_by_rarity_from_set(pool: list[dict], rarity: str) -> list[dict]:
+    return [c for c in pool if c.get("rarity") == rarity]
 
 
-def _select_random_cards_from_pool(card_pool: list[dict], count: int, exclude_ids: set = None) -> list[dict]:
-    """Select random cards from a pool, avoiding duplicates."""
+def _get_cu_from_pool(pool: list[dict]) -> list[dict]:
+    """Commons and uncommons combined."""
+    return [c for c in pool if c.get("rarity") in ("common", "uncommon")]
+
+
+def _get_cards_by_color_from_set(pool: list[dict], color_bucket: str) -> list[dict]:
+    return [c for c in pool if c.get("color_bucket") == color_bucket]
+
+
+def _get_cards_by_cn_range(pool: list[dict], cn_min: int, cn_max: int) -> list[dict]:
+    """Filter by collector number (integer range, inclusive)."""
+    return [c for c in pool if cn_min <= c.get("collector_number", 0) <= cn_max]
+
+
+def _select_random_cards_from_pool(pool: list[dict], count: int, exclude_ids: set = None) -> list[dict]:
     if exclude_ids is None:
         exclude_ids = set()
-
-    available_cards = [card for card in card_pool if card["id"] not in exclude_ids]
-
-    if len(available_cards) < count:
-        print(f"[booster] Warning: Only {len(available_cards)} cards available, requested {count}")
-        return available_cards
-
-    selected = random.sample(available_cards, count)
-
-    for card in selected:
-        exclude_ids.add(card["id"])
-
+    available = [c for c in pool if c["id"] not in exclude_ids]
+    if len(available) < count:
+        print(f"[booster] Warning: only {len(available)} available, requested {count}")
+        return available
+    selected = random.sample(available, count)
+    for c in selected:
+        exclude_ids.add(c["id"])
     return selected
 
 
-def _has_mythic_rares(set_cards: list[dict]) -> bool:
-    """Check if a set has any mythic rare cards."""
-    return any(card.get("rarity") == "mythic" for card in set_cards)
+def _has_mythic_rares(pool: list[dict]) -> bool:
+    return any(c.get("rarity") == "mythic" for c in pool)
 
 
-def _get_rare_or_mythic_card_from_set(set_cards: list[dict], exclude_ids: set = None) -> dict | None:
-    """Get a rare card with 1/8 chance of being mythic."""
+def _get_rare_or_mythic_card_from_set(pool: list[dict], exclude_ids: set = None) -> dict | None:
+    """Rare with 1-in-8 chance of mythic."""
     if exclude_ids is None:
         exclude_ids = set()
 
-    has_mythics = _has_mythic_rares(set_cards)
-    try_mythic = has_mythics and (random.randint(1, 8) == 1)
+    if _has_mythic_rares(pool) and random.randint(1, 8) == 1:
+        mythics = [c for c in pool if c.get("rarity") == "mythic" and c["id"] not in exclude_ids]
+        if mythics:
+            card = random.choice(mythics)
+            exclude_ids.add(card["id"])
+            return card
 
-    if try_mythic:
-        mythic_pool = _get_cards_by_rarity_from_set(set_cards, "mythic")
-        available_mythics = [card for card in mythic_pool if card["id"] not in exclude_ids]
+    rares = [c for c in pool if c.get("rarity") == "rare" and c["id"] not in exclude_ids]
+    if rares:
+        card = random.choice(rares)
+        exclude_ids.add(card["id"])
+        return card
 
-        if available_mythics:
-            selected = random.choice(available_mythics)
-            exclude_ids.add(selected["id"])
-            print(f"[booster] Selected mythic rare: {selected['name']}")
-            return selected
-        else:
-            print(f"[booster] No available mythic rares (all in exclude list), falling back to rare")
-
-    rare_pool = _get_cards_by_rarity_from_set(set_cards, "rare")
-    available_rares = [card for card in rare_pool if card["id"] not in exclude_ids]
-
-    if available_rares:
-        selected = random.choice(available_rares)
-        exclude_ids.add(selected["id"])
-        print(f"[booster] Selected rare: {selected['name']}")
-        return selected
-
-    print(f"[booster] No available rare cards!")
     return None
 
 
-def _get_common_land_from_set(set_cards: list[dict], exclude_ids: set = None) -> dict | None:
-    """Get a random common land from the set."""
+def _get_common_land_from_set(pool: list[dict], exclude_ids: set = None) -> dict | None:
     if exclude_ids is None:
         exclude_ids = set()
-
-    common_lands = [
-        card for card in set_cards
-        if card.get("rarity") == "common" and "Land" in card.get("type_line", "")
-    ]
-    available_lands = [card for card in common_lands if card["id"] not in exclude_ids]
-
-    if not available_lands:
-        print(f"[booster] No available common lands found")
+    lands = [c for c in pool if c.get("rarity") == "common" and "Land" in c.get("type_line", "")]
+    available = [c for c in lands if c["id"] not in exclude_ids]
+    if not available:
         return None
-
-    selected = random.choice(available_lands)
-    exclude_ids.add(selected["id"])
-    print(f"[booster] Selected common land: {selected['name']}")
-    return selected
+    card = random.choice(available)
+    exclude_ids.add(card["id"])
+    return card

@@ -5,266 +5,91 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>Booster Pack Simulator - Pi Commander</title>
 		<style>
-			body {
-				font-family: Arial, sans-serif;
-				margin: 20px;
-				background-color: #1a1a1a;
-				color: #fff;
-			}
-			.container {
-				max-width: 1200px;
-				margin: 0 auto;
-			}
-			.controls {
-				background: #2a2a2a;
-				padding: 20px;
-				border-radius: 8px;
-				margin-bottom: 20px;
-			}
-			select,
-			button {
-				padding: 10px;
-				margin: 5px;
-				border: none;
-				border-radius: 4px;
-				font-size: 16px;
-			}
-			select {
-				background: #3a3a3a;
-				color: #fff;
-				min-width: 300px;
-			}
-			button {
-				background: #4caf50;
-				color: white;
-				cursor: pointer;
-				padding: 12px 20px;
-			}
-			button:hover {
-				background: #45a049;
-			}
-			button:disabled {
-				background: #666;
-				cursor: not-allowed;
-			}
-			.random-btn {
-				background: #ff6b35;
-			}
-			.random-btn:hover {
-				background: #e85a2b;
-			}
-			.error {
-				color: #ff6b6b;
-				padding: 10px;
-				background: #2a1a1a;
-				border-radius: 4px;
-				margin: 10px 0;
-			}
-			.pack-grid {
-				display: grid;
-				grid-template-columns: repeat(5, 1fr);
-				gap: 15px;
-				margin-top: 20px;
-			}
+			body { font-family: Arial, sans-serif; margin: 20px; background-color: #1a1a1a; color: #fff; }
+			.container { max-width: 1200px; margin: 0 auto; }
+			.controls { background: #2a2a2a; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+			select, button { padding: 10px; margin: 5px; border: none; border-radius: 4px; font-size: 16px; }
+			select { background: #3a3a3a; color: #fff; min-width: 300px; }
+			button { background: #4caf50; color: white; cursor: pointer; padding: 12px 20px; }
+			button:hover { background: #45a049; }
+			button:disabled { background: #666; cursor: not-allowed; }
+			.random-btn { background: #ff6b35; }
+			.random-btn:hover { background: #e85a2b; }
+			.error { color: #ff6b6b; padding: 10px; background: #2a1a1a; border-radius: 4px; margin: 10px 0; }
+			.pack-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin-top: 20px; }
 			.card-slot {
-				aspect-ratio: 63/88;
-				border: 2px solid #444;
-				border-radius: 12px;
-				overflow: visible;
-				background: #2a2a2a;
-				position: relative;
-				transition:
-					transform 0.25s ease,
-					box-shadow 0.25s ease,
-					z-index 0s;
+				aspect-ratio: 63/88; border: 2px solid #444; border-radius: 12px;
+				overflow: visible; background: #2a2a2a; position: relative;
+				transition: transform 0.25s ease, box-shadow 0.25s ease, z-index 0s;
 			}
-			.card-slot.expanded {
-				transform: scale(1.18);
-				z-index: 10;
-				box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7);
-			}
+			.card-slot.expanded { transform: scale(1.18); z-index: 10; box-shadow: 0 12px 32px rgba(0,0,0,.7); }
 			.card-slot.loading {
-				background: linear-gradient(45deg, #2a2a2a, #3a3a3a, #2a2a2a);
-				background-size: 200% 200%;
-				animation: shimmer 1.5s infinite;
+				background: linear-gradient(45deg,#2a2a2a,#3a3a3a,#2a2a2a);
+				background-size: 200% 200%; animation: shimmer 1.5s infinite;
 			}
-			.card-slot.expanded .card-rarity {
-				opacity: 0;
-				transition: opacity 0.2s ease;
-			}
-			.card-rarity {
-				opacity: 1;
-				transition: opacity 0.2s ease;
-			}
+			.card-slot.expanded .card-rarity { opacity: 0; transition: opacity 0.2s ease; }
+			.card-rarity { opacity: 1; transition: opacity 0.2s ease; }
 			@keyframes shimmer {
-				0% {
-					background-position: 0% 0%;
-				}
-				50% {
-					background-position: 100% 100%;
-				}
-				100% {
-					background-position: 0% 0%;
-				}
+				0%   { background-position: 0% 0%; }
+				50%  { background-position: 100% 100%; }
+				100% { background-position: 0% 0%; }
 			}
 			.card-slot img {
-				position: absolute;
-				inset: 0;
-				width: 100%;
-				height: 100%;
-				object-fit: cover;
-				border-radius: 10px;
-				opacity: 0;
-				transition: opacity 0.3s ease;
+				position: absolute; inset: 0; width: 100%; height: 100%;
+				object-fit: cover; border-radius: 10px; opacity: 0; transition: opacity 0.3s ease;
 			}
-			.card-slot img.loaded {
-				opacity: 1;
-			}
+			.card-slot img.loaded { opacity: 1; }
 			.card-slot .send-overlay {
-				position: absolute;
-				bottom: 0;
-				left: 0;
-				right: 0;
-				background: rgba(0, 0, 0, 0.75);
-				display: none;
-				justify-content: center;
-				gap: 6px;
-				padding: 6px;
-				z-index: 10;
+				position: absolute; bottom: 0; left: 0; right: 0;
+				background: rgba(0,0,0,.75); display: none;
+				justify-content: center; gap: 6px; padding: 6px; z-index: 10;
 			}
-			.card-slot.revealed:hover .send-overlay {
-				display: flex;
-			}
+			.card-slot.revealed:hover .send-overlay { display: flex; }
 			.send-overlay button {
-				background: #4caf50;
-				color: #fff;
-				border: none;
-				border-radius: 4px;
-				padding: 4px 8px;
-				font-size: 12px;
-				cursor: pointer;
+				background: #4caf50; color: #fff; border: none;
+				border-radius: 4px; padding: 4px 8px; font-size: 12px; cursor: pointer;
 			}
-			.send-overlay button:hover {
-				background: #45a049;
-			}
+			.send-overlay button:hover { background: #45a049; }
 			.card-rarity {
-				position: absolute;
-				top: 5px;
-				right: 5px;
-				padding: 2px 6px;
-				border-radius: 3px;
-				font-size: 12px;
-				font-weight: bold;
+				position: absolute; top: 5px; right: 5px; padding: 2px 6px;
+				border-radius: 3px; font-size: 12px; font-weight: bold;
 			}
-			.rarity-common {
-				background: #8cc8ff;
-				color: #000;
-			}
-			.rarity-uncommon {
-				background: #c0c0c0;
-				color: #000;
-			}
-			.rarity-rare {
-				background: #ffb366;
-				color: #000;
-			}
-			.rarity-mythic {
-				background: #ff6b35;
-				color: #fff;
-			}
-			.rarity-land {
-				background: #8b4513;
-				color: #fff;
-			}
-			.rarity-list {
-				background: #2c7a2c;
-				color: #fff;
-			}
-			/* Mystery Booster badge colours */
-			.rarity-playtest {
-				background: #5a3a7a;
-				color: #fff;
-			}
-			.rarity-future {
-				background: #1a6b8a;
-				color: #fff;
-			}
-			.rarity-wborder {
-				background: #888;
-				color: #000;
-			}
+			.rarity-common   { background: #8cc8ff; color: #000; }
+			.rarity-uncommon { background: #c0c0c0; color: #000; }
+			.rarity-rare     { background: #ffb366; color: #000; }
+			.rarity-mythic   { background: #ff6b35; color: #fff; }
+			.rarity-land     { background: #8b4513; color: #fff; }
+			.rarity-list     { background: #2c7a2c; color: #fff; }
+			/* MB2 special slots */
+			.rarity-future   { background: #1a6b8a; color: #fff; }
+			.rarity-wborder  { background: #888;    color: #000; }
+			.rarity-playtest { background: #5a3a7a; color: #fff; }
 			.loading-text {
-				position: absolute;
-				top: 50%;
-				left: 50%;
-				transform: translate(-50%, -50%);
-				font-size: 12px;
-				color: #ccc;
-				text-align: center;
-				white-space: nowrap;
+				position: absolute; top: 50%; left: 50%;
+				transform: translate(-50%,-50%);
+				font-size: 12px; color: #ccc; text-align: center; white-space: nowrap;
 			}
 			/* QR overlay */
 			#sendQrOverlay {
-				display: none;
-				position: fixed;
-				inset: 0;
-				background: rgba(0, 0, 0, 0.85);
-				z-index: 100;
-				flex-direction: column;
-				align-items: center;
-				justify-content: center;
-				gap: 16px;
-				cursor: pointer;
+				display: none; position: fixed; inset: 0;
+				background: rgba(0,0,0,.85); z-index: 100;
+				flex-direction: column; align-items: center; justify-content: center;
+				gap: 16px; cursor: pointer;
 			}
-			#sendQrOverlay.visible {
-				display: flex;
-			}
-			#sendQrOverlay canvas {
-				width: 220px;
-				height: 220px;
-				image-rendering: pixelated;
-				background: #fff;
-				border-radius: 12px;
-			}
-			#sendQrOverlay .qr-label {
-				color: #fff;
-				font-size: 16px;
-				word-break: break-all;
-			}
-			#sendQrOverlay .qr-hint {
-				color: #aaa;
-				font-size: 13px;
-			}
-			/* Pack-type badge in set info bar */
+			#sendQrOverlay.visible { display: flex; }
+			#sendQrOverlay canvas  { width: 220px; height: 220px; image-rendering: pixelated; background: #fff; border-radius: 12px; }
+			#sendQrOverlay .qr-label { color: #fff; font-size: 16px; word-break: break-all; }
+			#sendQrOverlay .qr-hint  { color: #aaa; font-size: 13px; }
+			/* Pack-type badges */
 			.pack-type-badge {
-				display: inline-block;
-				padding: 2px 8px;
-				border-radius: 4px;
-				font-size: 12px;
-				font-weight: bold;
-				margin-left: 8px;
-				vertical-align: middle;
+				display: inline-block; padding: 2px 8px; border-radius: 4px;
+				font-size: 12px; font-weight: bold; margin-left: 8px; vertical-align: middle;
 			}
-			.pack-type-pre-foil {
-				background: #555;
-				color: #ccc;
-			}
-			.pack-type-draft {
-				background: #3a6baf;
-				color: #fff;
-			}
-			.pack-type-masters {
-				background: #af6b3a;
-				color: #fff;
-			}
-			.pack-type-play {
-				background: #7a3aaf;
-				color: #fff;
-			}
-			.pack-type-mystery {
-				background: #4a2060;
-				color: #e0c0ff;
-			}
+			.pack-type-pre-foil { background: #555;    color: #ccc; }
+			.pack-type-draft    { background: #3a6baf; color: #fff; }
+			.pack-type-masters  { background: #af6b3a; color: #fff; }
+			.pack-type-play     { background: #7a3aaf; color: #fff; }
+			.pack-type-mystery2 { background: #4a2060; color: #e0c0ff; }
 		</style>
 		<link rel="stylesheet" href="/static/card-flip.css" />
 		<link rel="stylesheet" href="/static/premium-effects.css" />
@@ -272,35 +97,17 @@
 	<body>
 		<div class="container">
 			<h1>Booster Tutor</h1>
-
 			<div class="controls">
 				<div>
 					<label for="setSelect">Choose a Set:</label>
-					<select id="setSelect">
-						<option value="">Loading sets...</option>
-					</select>
-					<button id="generateBtn" disabled onclick="generatePack()">
-						Generate Pack
-					</button>
-					<button
-						id="randomBtn"
-						class="random-btn"
-						onclick="generateRandomPack()"
-					>
-						Random Set Pack
-					</button>
-					<button id="flipAllBtn" style="display: none" onclick="flipAll()">
-						Flip All
-					</button>
+					<select id="setSelect"><option value="">Loading sets...</option></select>
+					<button id="generateBtn" disabled onclick="generatePack()">Generate Pack</button>
+					<button id="randomBtn" class="random-btn" onclick="generateRandomPack()">Random Set Pack</button>
+					<button id="flipAllBtn" style="display:none" onclick="flipAll()">Flip All</button>
 				</div>
-				<div
-					id="setInfo"
-					style="margin-top: 10px; font-size: 14px; color: #ccc"
-				></div>
+				<div id="setInfo" style="margin-top:10px;font-size:14px;color:#ccc"></div>
 			</div>
-
-			<div id="error" class="error" style="display: none"></div>
-
+			<div id="error" class="error" style="display:none"></div>
 			<div id="packGrid" class="pack-grid"></div>
 		</div>
 
@@ -315,63 +122,44 @@
 			const BASE_URL = "http://{{ LOCAL_IP }}{{ DEV_PORT }}";
 
 			// ── Flip mode ─────────────────────────────────────────────────────────────
-			// ?flipped=always  → cards render face-up immediately, no click needed
-			// ?flipped=auto    → cards start face-down but auto-flip once front is loaded
-			// (absent)         → default: cards start face-down, click to reveal
-			const FLIP_MODE =
-				new URLSearchParams(window.location.search).get("flipped") || "";
+			const FLIP_MODE = new URLSearchParams(window.location.search).get("flipped") || "";
 
 			// ── Era cutoff dates ──────────────────────────────────────────────────────
-			const FOIL_DEBUT = new Date("1999-02-15"); // Urza's Legacy — first foils
+			const FOIL_DEBUT         = new Date("1999-02-15"); // Urza's Legacy
 			const PLAY_BOOSTER_DEBUT = new Date("2024-02-02"); // Murders at Karlov Manor
 
-			// Draft-era foil: ~1-in-3 packs has a foil replacing one common
-			const DRAFT_FOIL_RATE = 1 / 3;
-
-			// Masters / draft_innovation sets always have a guaranteed foil slot
+			const DRAFT_FOIL_RATE   = 1 / 3;
 			const MASTERS_SET_TYPES = new Set(["masters", "draft_innovation"]);
 
-			// Mystery Booster set codes (detected by code, not by date/type)
-			const MYSTERY_BOOSTER_1_CODES = new Set(["mb1", "cmb1"]);
-			const MYSTERY_BOOSTER_2_CODES = new Set(["mb2"]);
+			// Mystery Booster 2 is detected by set code to avoid the Masters branch
+			const MYSTERY2_CODES = new Set(["mb2"]);
 
 			// ── Rarity weight tables ──────────────────────────────────────────────────
-
-			// Draft-era foil slot (replaces a common): heavily common-weighted
 			const DRAFT_FOIL_WEIGHTS = [
-				{ rarity: "common", weight: 55 },
+				{ rarity: "common",   weight: 55 },
 				{ rarity: "uncommon", weight: 25 },
-				{ rarity: "rare", weight: 15 },
-				{ rarity: "mythic", weight: 5 },
+				{ rarity: "rare",     weight: 15 },
+				{ rarity: "mythic",   weight:  5 },
 			];
-
-			// Masters foil slot: same shape, slightly richer at rare
 			const MASTERS_FOIL_WEIGHTS = [
-				{ rarity: "common", weight: 50 },
+				{ rarity: "common",   weight: 50 },
 				{ rarity: "uncommon", weight: 25 },
-				{ rarity: "rare", weight: 20 },
-				{ rarity: "mythic", weight: 5 },
+				{ rarity: "rare",     weight: 20 },
+				{ rarity: "mythic",   weight:  5 },
 			];
-
-			// Play Booster — non-foil wildcard (slot 13)
-			// Source: WotC published odds ~62/30/7/0.7
 			const PLAY_WILDCARD_NF_WEIGHTS = [
-				{ rarity: "common", weight: 62.1 },
+				{ rarity: "common",   weight: 62.1 },
 				{ rarity: "uncommon", weight: 30.0 },
-				{ rarity: "rare", weight: 7.06 },
-				{ rarity: "mythic", weight: 0.73 },
+				{ rarity: "rare",     weight:  7.06 },
+				{ rarity: "mythic",   weight:  0.73 },
 			];
-
-			// Play Booster — foil wildcard (slot 14)
-			// Source: WotC published odds ~50/31/15/3.5
 			const PLAY_WILDCARD_FOIL_WEIGHTS = [
-				{ rarity: "common", weight: 50.0 },
+				{ rarity: "common",   weight: 50.0 },
 				{ rarity: "uncommon", weight: 31.0 },
-				{ rarity: "rare", weight: 15.0 },
-				{ rarity: "mythic", weight: 3.5 },
+				{ rarity: "rare",     weight: 15.0 },
+				{ rarity: "mythic",   weight:  3.5 },
 			];
 
-			// ── Weighted random rarity picker ─────────────────────────────────────────
 			function rollWeightedRarity(weights) {
 				const total = weights.reduce((s, r) => s + r.weight, 0);
 				let roll = Math.random() * total;
@@ -382,38 +170,17 @@
 				return weights[0].rarity;
 			}
 
-			// ── Play Booster List/CU slot resolution ──────────────────────────────────
-			// Slot 7 in a Play Booster:
-			//   87.50% → common from set
-			//    9.38% → common or uncommon from The List (plist)
-			//    1.56% → rare or mythic from The List (plist)
-			//    1.56% → Special Guest (treat same as List rare/mythic; plist "rare")
-			// Returns: { setCode, apiRarity, type, label }
+			// ── Play Booster list/CU slot ─────────────────────────────────────────────
 			function rollListCuSlot(setCode) {
 				const roll = Math.random() * 100;
 				if (roll < 87.5) {
-					return {
-						setCode,
-						apiRarity: "common",
-						type: "common",
-						label: "Common",
-					};
-				} else if (roll < 87.5 + 9.38) {
+					return { setCode, apiRarity: "common", type: "common", label: "Common" };
+				} else if (roll < 96.88) {
 					const r = Math.random() < 0.5 ? "common" : "uncommon";
-					return {
-						setCode: "plist",
-						apiRarity: r,
-						type: "list",
-						label: "📋 List",
-					};
+					return { setCode: "plist", apiRarity: r, type: "list", label: "📋 List" };
 				} else {
-					const r = Math.random() < 1 / 8 ? "mythic" : "rare";
-					return {
-						setCode: "plist",
-						apiRarity: r,
-						type: "list",
-						label: "📋 List",
-					};
+					const r = Math.random() < 1/8 ? "mythic" : "rare";
+					return { setCode: "plist", apiRarity: r, type: "list", label: "📋 List" };
 				}
 			}
 
@@ -422,388 +189,198 @@
 			let packSize = 15;
 
 			// ── Pack profile ──────────────────────────────────────────────────────────
-			//
-			// Mystery Booster 1 (mb1) and Mystery Booster 2 (mb2) are detected by set
-			// code before any date/type checks, because their set_type is
-			// "draft_innovation" which would otherwise match the Masters branch.
-			//
 			function getPackProfile(set) {
 				const setDate = new Date(set.released_at);
 				const setType = set.set_type || "";
-				const code    = set.code ? set.code.toLowerCase() : "";
+				const code    = (set.code || "").toLowerCase();
 
-				// ── Mystery Booster 1 ────────────────────────────────────────────────
-				if (MYSTERY_BOOSTER_1_CODES.has(code)) {
-					return {
-						format: "mystery1",
-						packLabel: "Mystery Booster",
-						foilGuaranteed: false,
-						foilRate: 0,
-						foilReplacesCommon: false,
-					};
+				// Mystery Booster 2 — must be checked BEFORE Masters (same set_type)
+				if (MYSTERY2_CODES.has(code)) {
+					return { format: "mystery2", packLabel: "Mystery Booster 2",
+					         foilGuaranteed: false, foilRate: 0, foilReplacesCommon: false };
 				}
-
-				// ── Mystery Booster 2 ────────────────────────────────────────────────
-				if (MYSTERY_BOOSTER_2_CODES.has(code)) {
-					return {
-						format: "mystery2",
-						packLabel: "Mystery Booster 2",
-						foilGuaranteed: false,
-						foilRate: 0,
-						foilReplacesCommon: false,
-					};
-				}
-
 				if (setDate < FOIL_DEBUT) {
-					return {
-						format: "pre-foil",
-						packLabel: "Pre-Foil",
-						foilGuaranteed: false,
-						foilRate: 0,
-						foilReplacesCommon: false,
-					};
+					return { format: "pre-foil", packLabel: "Pre-Foil",
+					         foilGuaranteed: false, foilRate: 0, foilReplacesCommon: false };
 				}
 				if (MASTERS_SET_TYPES.has(setType)) {
-					return {
-						format: "masters",
-						packLabel: "Masters",
-						foilGuaranteed: true,
-						foilRate: 1,
-						foilReplacesCommon: false,
-					};
+					return { format: "masters", packLabel: "Masters",
+					         foilGuaranteed: true, foilRate: 1, foilReplacesCommon: false };
 				}
 				if (setDate >= PLAY_BOOSTER_DEBUT) {
-					return {
-						format: "play",
-						packLabel: "Play Booster",
-						foilGuaranteed: true,
-						foilRate: 1,
-						foilReplacesCommon: false,
-					};
+					return { format: "play", packLabel: "Play Booster",
+					         foilGuaranteed: true, foilRate: 1, foilReplacesCommon: false };
 				}
-				return {
-					format: "draft",
-					packLabel: "Draft Booster",
-					foilGuaranteed: false,
-					foilRate: DRAFT_FOIL_RATE,
-					foilReplacesCommon: true,
-				};
+				return { format: "draft", packLabel: "Draft Booster",
+				         foilGuaranteed: false, foilRate: DRAFT_FOIL_RATE, foilReplacesCommon: true };
+			}
+
+			// ── Mystery Booster 2 slot manifest ──────────────────────────────────────
+			//
+			// Card sources:
+			//   mb2_main     = e:plst date=2024-08-02  (The List reprints for MB2)
+			//   mb2 (physical) filtered by collector number:
+			//     cn  1–121  white-bordered reprints
+			//     cn 122–143 Future Sight frame C/U (non-foil only)
+			//     cn 144–242 Future Sight frame all rarities (foil-able)
+			//     cn 243–264 Future Sight frame foil-exclusives (always foil)
+			//     cn 265+    Playtest / test cards
+			//
+			// Slot layout (15 cards):
+			//   [0–9]  10 C/U from mb2_main — 2 per colour (W U B R G), shuffled
+			//   [10]   1 C/U from mb2_main  — multicolour OR artifact OR land (1-in-3 each)
+			//   [11]   1 R/M from mb2_main
+			//   [12]   1 Future Sight frame card (roll 1–100):
+			//            roll=1        → cn 243–264, isFoil=true
+			//            roll 2–4     → cn 144–242, isFoil=true
+			//            roll 5–100   → cn 122–242, isFoil=false
+			//   [13]   1 white-bordered card from mb2 cn 1–121, any rarity, no foil
+			//   [14]   1 playtest card from mb2 cn 265+, any rarity, no foil
+			//
+			function buildMystery2Manifest(code) {
+				const slots = [];
+
+				// Slots 0–9: 2× each colour C/U, shuffled
+				const colorBuckets = ["w","u","b","r","g"];
+				const colorSlots = [];
+				for (const color of colorBuckets) {
+					for (let i = 0; i < 2; i++) {
+						colorSlots.push({
+							type:     "mb2-cu",
+							label:    color.toUpperCase(),
+							apiRarity: "cu",
+							isFoil:   false,
+							setCode:  code,
+							subtype:  "mb2_main",
+							color,
+						});
+					}
+				}
+				// Shuffle so the order is random, matching physical collation
+				for (let i = colorSlots.length - 1; i > 0; i--) {
+					const j = Math.floor(Math.random() * (i + 1));
+					[colorSlots[i], colorSlots[j]] = [colorSlots[j], colorSlots[i]];
+				}
+				slots.push(...colorSlots);
+
+				// Slot 10: multi OR artifact OR land (1-in-3)
+				const mixedColors = ["multi", "colorless", "land"];
+				const mixedColor  = mixedColors[Math.floor(Math.random() * 3)];
+				slots.push({
+					type:     "mb2-cu",
+					label:    mixedColor === "multi" ? "Multi" : mixedColor === "land" ? "Land" : "Artifact",
+					apiRarity: "cu",
+					isFoil:   false,
+					setCode:  code,
+					subtype:  "mb2_main",
+					color:    mixedColor,
+				});
+
+				// Slot 11: R/M from mb2_main
+				slots.push({
+					type:     "mb2-rare",
+					label:    "Rare",
+					apiRarity: "rare",
+					isFoil:   false,
+					setCode:  code,
+					subtype:  "mb2_main",
+				});
+
+				// Slot 12: Future Sight frame (roll 1–100)
+				const fsRoll = Math.floor(Math.random() * 100) + 1; // 1–100
+				let fsCnMin, fsCnMax, fsFoil;
+				if (fsRoll === 1) {
+					// 1% foil-exclusive (cn 243–264)
+					fsCnMin = 243; fsCnMax = 264; fsFoil = true;
+				} else if (fsRoll <= 4) {
+					// 2–4 → 3% foil from cn 144–242
+					fsCnMin = 144; fsCnMax = 242; fsFoil = true;
+				} else {
+					// 5–100 → 96% non-foil from cn 122–242
+					fsCnMin = 122; fsCnMax = 242; fsFoil = false;
+				}
+				slots.push({
+					type:     "future-sight",
+					label:    fsFoil ? "✨ Future" : "🔮 Future",
+					apiRarity: "any",
+					isFoil:   fsFoil,
+					setCode:  code,
+					subtype:  "mb2_frame",
+					cn_min:   fsCnMin,
+					cn_max:   fsCnMax,
+				});
+
+				// Slot 13: white-bordered card (cn 1–121, any rarity, no foil)
+				slots.push({
+					type:     "white-border",
+					label:    "🤍 W-Border",
+					apiRarity: "any",
+					isFoil:   false,
+					setCode:  code,
+					subtype:  "mb2_border",
+					cn_min:   1,
+					cn_max:   121,
+				});
+
+				// Slot 14: playtest card (cn 265+, any rarity, no foil)
+				slots.push({
+					type:     "playtest",
+					label:    "🧪 Test",
+					apiRarity: "any",
+					isFoil:   false,
+					setCode:  code,
+					subtype:  "mb2_test",
+					cn_min:   265,
+					cn_max:   9999,
+				});
+
+				return slots;
 			}
 
 			// ── Slot manifest builder ─────────────────────────────────────────────────
-			//
-			// All random decisions are resolved HERE so the grid placeholders and the
-			// generation loop are always in sync — no decision is made twice.
-			//
-			// Each slot descriptor:
-			//   { type, label, apiRarity, isFoil, setCode, color?, frame?, border? }
-			//
-			// Mystery Booster 1 slot order (15 cards):
-			//   Slots 1–8:  one C/U per colour (W U B R G) + multicolour + artifact + land
-			//   Slots 9–12: four free C/U slots (any colour/type, no land)
-			//   Slot  13:   rare or mythic
-			//   Slot  14:   foil (retail) OR playtest from cmb1 (convention)
-			//   Slot  15:   playtest from cmb1 (convention only — retail packs omit this)
-			//
-			// Mystery Booster 2 slot order (15 cards):
-			//   Slots 1–10: 2× each colour (W U B R G), C/U only
-			//   Slot  11:   multicolour/artifact/land C/U
-			//   Slot  12:   rare or mythic (main MB2 pool)
-			//   Slot  13:   Future Sight frame card (60% rare/mythic, ~5% foil)
-			//   Slot  14:   white-bordered card (40% rare/mythic)
-			//   Slot  15:   playtest card (set pmb2)
-			//
-			// Play Booster slot order:
-			//   1–6  commons → 7 list/CU → 8–10 uncommons → 11 rare → 12 land
-			//   → 13 non-foil wildcard → 14 foil wildcard
-			//
-			// Draft Booster slot order:
-			//   commons (9 or 10) → uncommons → rare → foil (if hit) → land
-			//
-			// Masters slot order:
-			//   10 commons → 3 uncommons → rare → foil
-			//
 			function buildSlotManifest(set, profile, hasFoil) {
 				const code = set.code;
 				const slots = [];
 
-				// ── Mystery Booster 1 ────────────────────────────────────────────────
-				if (profile.format === "mystery1") {
-					// Slots 1–8: one guaranteed C/U per colour bucket + multi + artifact + land
-					for (const color of ["w", "u", "b", "r", "g"]) {
-						slots.push({
-							type: "mystery-color",
-							label: color.toUpperCase(),
-							apiRarity: "common",   // endpoint picks C or U from this bucket
-							isFoil: false,
-							setCode: code,
-							color,
-						});
-					}
-					slots.push({
-						type: "mystery-color",
-						label: "Multi",
-						apiRarity: "common",
-						isFoil: false,
-						setCode: code,
-						color: "multi",
-					});
-					slots.push({
-						type: "mystery-color",
-						label: "Artifact",
-						apiRarity: "common",
-						isFoil: false,
-						setCode: code,
-						color: "colorless",
-					});
-					slots.push({
-						type: "land",
-						label: "Land",
-						apiRarity: "land",
-						isFoil: false,
-						setCode: code,
-						color: "land",
-					});
-
-					// Slots 9–12: four free C/U slots (any colour — no land)
-					for (let i = 0; i < 4; i++) {
-						slots.push({
-							type: "mystery-free",
-							label: "C/U",
-							apiRarity: "common",
-							isFoil: false,
-							setCode: code,
-						});
-					}
-
-					// Slot 13: rare or mythic
-					slots.push({
-						type: "rare",
-						label: "Rare",
-						apiRarity: "rare",
-						isFoil: false,
-						setCode: code,
-					});
-
-					// Slot 14: foil (retail) — no convention playtest support here
-					slots.push({
-						type: "foil",
-						label: "✨ Foil",
-						apiRarity: "any",
-						isFoil: true,
-						setCode: code,
-					});
-
-					return slots;
-				}
-
-				// ── Mystery Booster 2 ────────────────────────────────────────────────
 				if (profile.format === "mystery2") {
-					// Slots 1–10: 2 × each colour W U B R G, C/U only
-					for (const color of ["w", "u", "b", "r", "g"]) {
-						for (let i = 0; i < 2; i++) {
-							slots.push({
-								type: "mystery-color",
-								label: color.toUpperCase(),
-								apiRarity: "common",
-								isFoil: false,
-								setCode: code,
-								color,
-							});
-						}
-					}
-
-					// Slot 11: multi/artifact/land C/U
-					slots.push({
-						type: "mystery-color",
-						label: "Multi/Art/Land",
-						apiRarity: "common",
-						isFoil: false,
-						setCode: code,
-						color: "multi",   // backend falls back through colorless → land if needed
-					});
-
-					// Slot 12: rare or mythic (main MB2 pool)
-					slots.push({
-						type: "rare",
-						label: "Rare",
-						apiRarity: "rare",
-						isFoil: false,
-						setCode: code,
-					});
-
-					// Slot 13: Future Sight frame card
-					//   ~60% rare/mythic, ~5% foil version, ~35% C/U
-					//   We resolve rarity AND foil here.
-					const fsRoll = Math.random() * 100;
-					const fsFoil  = fsRoll < 5;                   // <5% foil
-					const fsRarity = fsRoll < 60 ? "rare" : "common"; // 60% rare/mythic
-					slots.push({
-						type: "future-sight",
-						label: fsFoil ? "✨ Future" : "🔮 Future",
-						apiRarity: fsRarity,
-						isFoil: fsFoil,
-						setCode: code,
-						frame: "future",
-					});
-
-					// Slot 14: white-bordered card
-					//   40% rare/mythic, 60% C/U
-					const wbRarity = Math.random() < 0.40 ? "rare" : "common";
-					slots.push({
-						type: "white-border",
-						label: "🤍 W-Border",
-						apiRarity: wbRarity,
-						isFoil: false,
-						setCode: code,
-						border: "white",
-					});
-
-					// Slot 15: playtest card
-					slots.push({
-						type: "playtest",
-						label: "🧪 Playtest",
-						apiRarity: "any",
-						isFoil: false,
-						setCode: "pmb2",
-					});
-
-					return slots;
+					return buildMystery2Manifest(code);
 				}
 
-				// ── Play Booster ─────────────────────────────────────────────────────
 				if (profile.format === "play") {
 					for (let i = 0; i < 6; i++)
-						slots.push({
-							type: "common",
-							label: "Common",
-							apiRarity: "common",
-							isFoil: false,
-							setCode: code,
-						});
-
+						slots.push({ type: "common", label: "Common", apiRarity: "common", isFoil: false, setCode: code });
 					slots.push(rollListCuSlot(code));
-
 					for (let i = 0; i < 3; i++)
-						slots.push({
-							type: "uncommon",
-							label: "Uncommon",
-							apiRarity: "uncommon",
-							isFoil: false,
-							setCode: code,
-						});
-
-					slots.push({
-						type: "rare",
-						label: "Rare",
-						apiRarity: "rare",
-						isFoil: false,
-						setCode: code,
-					});
-
-					slots.push({
-						type: "land",
-						label: "Land",
-						apiRarity: "land",
-						isFoil: false,
-						setCode: code,
-					});
-
+						slots.push({ type: "uncommon", label: "Uncommon", apiRarity: "uncommon", isFoil: false, setCode: code });
+					slots.push({ type: "rare",   label: "Rare", apiRarity: "rare", isFoil: false, setCode: code });
+					slots.push({ type: "land",   label: "Land", apiRarity: "land", isFoil: false, setCode: code });
 					const nfRarity = rollWeightedRarity(PLAY_WILDCARD_NF_WEIGHTS);
-					slots.push({
-						type: "wildcard-nf",
-						label: "🃏 Wild",
-						apiRarity: nfRarity,
-						isFoil: false,
-						setCode: code,
-					});
-
+					slots.push({ type: "wildcard-nf",   label: "🃏 Wild", apiRarity: nfRarity,   isFoil: false, setCode: code });
 					const foilRarity = rollWeightedRarity(PLAY_WILDCARD_FOIL_WEIGHTS);
-					slots.push({
-						type: "wildcard-foil",
-						label: "✨ Wild",
-						apiRarity: foilRarity,
-						isFoil: true,
-						setCode: code,
-					});
+					slots.push({ type: "wildcard-foil", label: "✨ Wild", apiRarity: foilRarity, isFoil: true,  setCode: code });
 
-				// ── Masters ──────────────────────────────────────────────────────────
 				} else if (profile.format === "masters") {
 					for (let i = 0; i < 10; i++)
-						slots.push({
-							type: "common",
-							label: "Common",
-							apiRarity: "common",
-							isFoil: false,
-							setCode: code,
-						});
+						slots.push({ type: "common",   label: "Common",   apiRarity: "common",   isFoil: false, setCode: code });
 					for (let i = 0; i < 3; i++)
-						slots.push({
-							type: "uncommon",
-							label: "Uncommon",
-							apiRarity: "uncommon",
-							isFoil: false,
-							setCode: code,
-						});
-					slots.push({
-						type: "rare",
-						label: "Rare",
-						apiRarity: "rare",
-						isFoil: false,
-						setCode: code,
-					});
+						slots.push({ type: "uncommon", label: "Uncommon", apiRarity: "uncommon", isFoil: false, setCode: code });
+					slots.push({ type: "rare", label: "Rare", apiRarity: "rare", isFoil: false, setCode: code });
 					const foilRarity = rollWeightedRarity(MASTERS_FOIL_WEIGHTS);
-					slots.push({
-						type: "foil",
-						label: "✨ Foil",
-						apiRarity: foilRarity,
-						isFoil: true,
-						setCode: code,
-					});
+					slots.push({ type: "foil", label: "✨ Foil", apiRarity: foilRarity, isFoil: true, setCode: code });
 
-				// ── Draft / Pre-foil ─────────────────────────────────────────────────
 				} else {
+					// Draft / Pre-foil
 					const commonCount = hasFoil && profile.foilReplacesCommon ? 9 : 10;
 					for (let i = 0; i < commonCount; i++)
-						slots.push({
-							type: "common",
-							label: "Common",
-							apiRarity: "common",
-							isFoil: false,
-							setCode: code,
-						});
+						slots.push({ type: "common",   label: "Common",   apiRarity: "common",   isFoil: false, setCode: code });
 					for (let i = 0; i < 3; i++)
-						slots.push({
-							type: "uncommon",
-							label: "Uncommon",
-							apiRarity: "uncommon",
-							isFoil: false,
-							setCode: code,
-						});
-					slots.push({
-						type: "rare",
-						label: "Rare",
-						apiRarity: "rare",
-						isFoil: false,
-						setCode: code,
-					});
+						slots.push({ type: "uncommon", label: "Uncommon", apiRarity: "uncommon", isFoil: false, setCode: code });
+					slots.push({ type: "rare", label: "Rare", apiRarity: "rare", isFoil: false, setCode: code });
 					if (hasFoil) {
 						const foilRarity = rollWeightedRarity(DRAFT_FOIL_WEIGHTS);
-						slots.push({
-							type: "foil",
-							label: "✨ Foil",
-							apiRarity: foilRarity,
-							isFoil: true,
-							setCode: code,
-						});
+						slots.push({ type: "foil", label: "✨ Foil", apiRarity: foilRarity, isFoil: true, setCode: code });
 					}
-					slots.push({
-						type: "land",
-						label: "Land",
-						apiRarity: "land",
-						isFoil: false,
-						setCode: code,
-					});
+					slots.push({ type: "land", label: "Land", apiRarity: "land", isFoil: false, setCode: code });
 				}
 
 				return slots;
@@ -815,8 +392,7 @@
 				if (sendQrLibLoaded) return;
 				await new Promise((resolve, reject) => {
 					const s = document.createElement("script");
-					s.src =
-						"https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
+					s.src = "https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js";
 					s.onload = resolve;
 					s.onerror = () => reject(new Error("Failed to load QR library"));
 					document.head.appendChild(s);
@@ -826,47 +402,31 @@
 
 			function drawQrToCanvas(text, canvas) {
 				const qr = window.qrcode(0, "M");
-				qr.addData(text);
-				qr.make();
+				qr.addData(text); qr.make();
 				const ctx = canvas.getContext("2d");
 				const count = qr.getModuleCount();
-				const size = canvas.width;
+				const size  = canvas.width;
 				const scale = Math.floor(size / count);
 				const offset = Math.floor((size - count * scale) / 2);
-				ctx.fillStyle = "#fff";
-				ctx.fillRect(0, 0, size, size);
+				ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, size, size);
 				ctx.fillStyle = "#000";
 				for (let r = 0; r < count; r++)
 					for (let c = 0; c < count; c++)
 						if (qr.isDark(r, c))
-							ctx.fillRect(
-								offset + c * scale,
-								offset + r * scale,
-								scale,
-								scale,
-							);
+							ctx.fillRect(offset + c*scale, offset + r*scale, scale, scale);
 			}
 
-			function playerPath(p) {
-				return p === 1 ? "/face" : `/player${p}`;
-			}
+			function playerPath(p) { return p === 1 ? "/face" : `/player${p}`; }
 
 			async function showSendQr(player) {
 				const url = `${BASE_URL}${playerPath(player)}`;
 				document.getElementById("sendQrLabel").textContent = url;
 				const canvas = document.getElementById("sendQrCanvas");
-				try {
-					await ensureSendQrLib();
-					drawQrToCanvas(url, canvas);
-				} catch {
-					/* skip */
-				}
+				try { await ensureSendQrLib(); drawQrToCanvas(url, canvas); } catch { /* skip */ }
 				document.getElementById("sendQrOverlay").classList.add("visible");
 			}
 
-			function hideSendQr() {
-				document.getElementById("sendQrOverlay").classList.remove("visible");
-			}
+			function hideSendQr() { document.getElementById("sendQrOverlay").classList.remove("visible"); }
 
 			function flipAll() {
 				for (let i = 0; i < packSize; i++) {
@@ -883,45 +443,36 @@
 					if (data.error) throw new Error(data.error);
 					allSets = data.sets;
 					populateSetSelect();
-				} catch (error) {
-					showError("Failed to load sets: " + error.message);
-				}
+				} catch (error) { showError("Failed to load sets: " + error.message); }
 			}
 
 			function populateSetSelect() {
 				const select = document.getElementById("setSelect");
 				select.innerHTML = '<option value="">-- Choose a set --</option>';
 
-				const sortedSets = allSets
-					.filter((set) => set.card_count > 0)
-					.sort((a, b) => new Date(b.released_at) - new Date(a.released_at));
-
-				sortedSets.forEach((set) => {
-					const option = document.createElement("option");
-					option.value = set.code;
-					option.textContent = `${set.name} (${set.released_at})`;
-					option.setAttribute("data-icon", set.icon_svg_uri || "");
-					select.appendChild(option);
-				});
+				allSets
+					.filter(s => s.card_count > 0)
+					.sort((a, b) => new Date(b.released_at) - new Date(a.released_at))
+					.forEach(set => {
+						const opt = document.createElement("option");
+						opt.value = set.code;
+						opt.textContent = `${set.name} (${set.released_at})`;
+						opt.setAttribute("data-icon", set.icon_svg_uri || "");
+						select.appendChild(opt);
+					});
 
 				select.addEventListener("change", function () {
 					document.getElementById("generateBtn").disabled = !this.value;
-					if (this.value) {
-						updateSetInfo(allSets.find((s) => s.code === this.value));
-					} else {
-						document.getElementById("setInfo").innerHTML = "";
-					}
+					if (this.value) updateSetInfo(allSets.find(s => s.code === this.value));
+					else document.getElementById("setInfo").innerHTML = "";
 				});
 			}
 
 			function updateSetInfo(set) {
 				const profile = getPackProfile(set);
 				let html = `<span style="font-family:monospace;background:#3a3a3a;padding:2px 6px;border-radius:3px;margin-right:8px">${set.code}</span>${set.card_count} cards • Released: ${set.released_at}<span class="pack-type-badge pack-type-${profile.format}">${profile.packLabel}</span>`;
-				if (set.icon_svg_uri) {
-					html =
-						`<img src="${set.icon_svg_uri}" alt="${set.name} icon" style="width:20px;height:20px;margin-right:8px;vertical-align:middle">` +
-						html;
-				}
+				if (set.icon_svg_uri)
+					html = `<img src="${set.icon_svg_uri}" alt="" style="width:20px;height:20px;margin-right:8px;vertical-align:middle">` + html;
 				document.getElementById("setInfo").innerHTML = html;
 			}
 
@@ -933,41 +484,35 @@
 			}
 
 			async function generateRandomPack() {
-				const eligibleSets = allSets.filter((set) => set.card_count > 50);
-				const randomSet =
-					eligibleSets[Math.floor(Math.random() * eligibleSets.length)];
-				document.getElementById("setSelect").value = randomSet.code;
-				updateSetInfo(randomSet);
-				await generatePackForSet(randomSet.code);
+				const eligible = allSets.filter(s => s.card_count > 50);
+				const set = eligible[Math.floor(Math.random() * eligible.length)];
+				document.getElementById("setSelect").value = set.code;
+				updateSetInfo(set);
+				await generatePackForSet(set.code);
 			}
 
 			async function generatePackForSet(setCode) {
 				if (currentGeneration) currentGeneration.cancelled = true;
 
-				const selectedSet = allSets.find((s) => s.code === setCode);
+				const selectedSet = allSets.find(s => s.code === setCode);
 				const profile = getPackProfile(selectedSet);
-
-				const hasFoil =
-					profile.foilGuaranteed ||
-					(profile.foilRate > 0 && Math.random() < profile.foilRate);
-
-				const slots = buildSlotManifest(selectedSet, profile, hasFoil);
+				const hasFoil = profile.foilGuaranteed || (profile.foilRate > 0 && Math.random() < profile.foilRate);
+				const slots   = buildSlotManifest(selectedSet, profile, hasFoil);
 				packSize = slots.length;
 
 				currentGeneration = { cancelled: false, cardCount: 0, slots };
 				document.getElementById("generateBtn").disabled = true;
-				document.getElementById("randomBtn").disabled = true;
+				document.getElementById("randomBtn").disabled   = true;
 				hideError();
 				setupPackGrid(slots);
 
 				try {
 					await generatePackProgressive(setCode, currentGeneration);
 				} catch (error) {
-					if (!currentGeneration.cancelled)
-						showError("Failed to generate pack: " + error.message);
+					if (!currentGeneration.cancelled) showError("Failed to generate pack: " + error.message);
 				} finally {
 					document.getElementById("generateBtn").disabled = false;
-					document.getElementById("randomBtn").disabled = false;
+					document.getElementById("randomBtn").disabled   = false;
 					if (!currentGeneration.cancelled) currentGeneration = null;
 				}
 			}
@@ -975,20 +520,17 @@
 			// ── Grid setup ────────────────────────────────────────────────────────────
 			function setupPackGrid(slots) {
 				document.getElementById("flipAllBtn").style.display = "none";
-				document.getElementById("flipAllBtn").textContent = "Flip All";
+				document.getElementById("flipAllBtn").textContent   = "Flip All";
 				const grid = document.getElementById("packGrid");
 				grid.innerHTML = "";
-
 				for (let i = 0; i < slots.length; i++) {
 					const cardSlot = document.createElement("div");
 					cardSlot.className = "card-slot loading";
 					cardSlot.id = `card-slot-${i}`;
-
-					const loadingText = document.createElement("div");
-					loadingText.className = "loading-text";
-					loadingText.textContent = slots[i].label;
-
-					cardSlot.appendChild(loadingText);
+					const txt = document.createElement("div");
+					txt.className = "loading-text";
+					txt.textContent = slots[i].label;
+					cardSlot.appendChild(txt);
 					grid.appendChild(cardSlot);
 				}
 			}
@@ -1000,9 +542,7 @@
 
 				for (let i = 0; i < slots.length; i++) {
 					if (generation.cancelled) return;
-
 					const slot = slots[i];
-
 					try {
 						const card = await fetchSingleCard(slot, usedCardIds);
 						if (!generation.cancelled && card) {
@@ -1011,95 +551,55 @@
 							generation.cardCount++;
 						}
 					} catch (error) {
-						if (slot.type === "land") {
-							// No basic lands in this set — fall back to an extra common
-							console.log(
-								"No common lands in this set, replacing land slot with common",
-							);
+						// Fallback: land → extra common; MB2 special slots → extra C/U
+						const isMb2Special = ["future-sight","white-border","playtest"].includes(slot.type);
+						if (slot.type === "land" || isMb2Special) {
+							console.warn(`Slot ${slot.type} failed (${error.message}), falling back to C/U`);
 							try {
-								const card = await fetchSingleCard(
-									{ setCode, apiRarity: "common" },
-									usedCardIds,
-								);
+								const card = await fetchSingleCard({ setCode, apiRarity: "common" }, usedCardIds);
 								if (!generation.cancelled && card) {
 									displayCard(card, i, false, "common");
 									usedCardIds.add(card.id);
 									generation.cardCount++;
 								}
-							} catch (fb) {
-								console.error(
-									"Failed to fetch fallback common for land slot:",
-									fb,
-								);
-							}
-						} else if (
-							slot.type === "future-sight" ||
-							slot.type === "white-border" ||
-							slot.type === "playtest"
-						) {
-							// MB2 special slots: if the frame/border/set filter finds nothing,
-							// fall back to a plain C/U from the main set.
-							console.warn(
-								`MB2 slot ${slot.type} failed (${error.message}), falling back to C/U`,
-							);
-							try {
-								const card = await fetchSingleCard(
-									{ setCode, apiRarity: "common" },
-									usedCardIds,
-								);
-								if (!generation.cancelled && card) {
-									displayCard(card, i, false, "common");
-									usedCardIds.add(card.id);
-									generation.cardCount++;
-								}
-							} catch (fb) {
-								console.error(`Failed to fetch fallback for ${slot.type}:`, fb);
-							}
+							} catch (fb) { console.error("Fallback failed:", fb); }
 						} else {
-							console.error(
-								`Failed to fetch slot ${i} (${slot.label}):`,
-								error,
-							);
+							console.error(`Slot ${i} (${slot.label}):`, error);
 						}
 					}
 				}
 
-				if (!generation.cancelled) {
+				if (!generation.cancelled)
 					document.getElementById("flipAllBtn").style.display = "";
-				}
 			}
 
 			// ── Single-card fetch ─────────────────────────────────────────────────────
 			//
-			// Accepts a full slot descriptor so it can forward color/frame/border
-			// filters to the backend for Mystery Booster slots.
-			//
-			// For Mystery Booster colour slots (mystery-color, mystery-free) the
-			// apiRarity in the manifest is "common" — but the backend's colour-bucket
-			// filter returns both commons and uncommons from that bucket.  We pick "any"
-			// when a colour filter is active so the backend doesn't further restrict to
-			// commons only.
+			// Accepts a full slot descriptor.  Extra fields forwarded to backend:
+			//   subtype  – "mb2_main" | "mb2_frame" | "mb2_border" | "mb2_test"
+			//   color    – colour-bucket filter
+			//   cn_min   – collector-number lower bound
+			//   cn_max   – collector-number upper bound
 			//
 			async function fetchSingleCard(slot, usedCardIds = new Set()) {
-				const setCode   = slot.setCode   || slot;  // backward compat: plain string
-				const rarity    = slot.apiRarity || slot;
-				const color     = slot.color  || null;
-				const frame     = slot.frame  || null;
-				const border    = slot.border || null;
-
-				// For colour-bucket slots use "any" rarity so both C and U are eligible.
-				const effectiveRarity = color ? "any" : rarity;
+				const setCode  = typeof slot === "string" ? slot : slot.setCode;
+				const rarity   = typeof slot === "string" ? "common" : (slot.apiRarity || "any");
+				const subtype  = slot.subtype  || null;
+				const color    = slot.color    || null;
+				const cn_min   = slot.cn_min   != null ? slot.cn_min  : null;
+				const cn_max   = slot.cn_max   != null ? slot.cn_max  : null;
 
 				const maxAttempts = 20;
-				for (let attempts = 0; attempts < maxAttempts; attempts++) {
+				for (let attempt = 0; attempt < maxAttempts; attempt++) {
 					const body = {
 						set_code:    setCode,
-						rarity:      effectiveRarity,
+						rarity:      rarity,
 						exclude_ids: Array.from(usedCardIds),
 					};
-					if (color)  body.color  = color;
-					if (frame)  body.frame  = frame;
-					if (border) body.border = border;
+					if (subtype) body.subtype = subtype;
+					if (color)   body.color   = color;
+					if (cn_min !== null) body.cn_min = cn_min;
+					if (cn_max !== null) body.cn_max = cn_max;
 
 					const response = await fetch("/api/booster/single", {
 						method:  "POST",
@@ -1117,51 +617,32 @@
 
 					const card = data.card;
 
-					// Re-roll if a plain common slot accidentally returned a basic land
-					// (only applies when no colour filter is active)
-					if (!color && rarity === "common" && card.is_common_land) {
-						console.log(
-							`Re-rolling common land: ${card.name} (attempt ${attempts + 1})`,
-						);
+					// Re-roll if a plain common slot got a basic land (no active filters)
+					if (!subtype && !color && rarity === "common" && card.is_common_land) {
+						console.log(`Re-rolling land: ${card.name} (attempt ${attempt + 1})`);
 						usedCardIds.add(card.id);
 						continue;
 					}
 
 					return card;
 				}
-
-				throw new Error(
-					`Failed to get card after ${maxAttempts} attempts`,
-				);
+				throw new Error(`No card after ${maxAttempts} attempts`);
 			}
 
 			// ── Card display ──────────────────────────────────────────────────────────
 			//
-			// slotType is the FINAL resolved type — never a prediction.
-			// Badge is derived from what actually happened:
+			// slotType → badge mapping:
+			//   isFoil=true          ✨  (rarity colour)
+			//   land                  L  (brown)
+			//   list                 📋  (green)
+			//   wildcard-nf          🃏  (rarity colour)
+			//   mb2-cu / mb2-rare     first letter of rarity (rarity colour)
+			//   future-sight         🔮  (teal)   — ✨ overrides if isFoil
+			//   white-border         🤍  (grey)
+			//   playtest             🧪  (purple)
+			//   anything else        first letter of rarity
 			//
-			//   isFoil=true              → ✨  (card's actual rarity colour)
-			//   slotType="land"          → L   (brown)
-			//   slotType="list"          → 📋  (green)
-			//   slotType="wildcard-nf"   → 🃏  (card's actual rarity colour)
-			//   slotType="mystery-color" → colour initial (card's rarity colour)
-			//   slotType="mystery-free"  → ?   (card's rarity colour)
-			//   slotType="future-sight"  → 🔮  (teal)
-			//   slotType="white-border"  → 🤍  (grey)
-			//   slotType="playtest"      → 🧪  (purple)
-			//   anything else            → first letter of card's actual rarity
-			//
-			// FLIP_MODE behaviour:
-			//   "always" → card starts face-up immediately (no animation, no click needed)
-			//   "auto"   → card starts face-down (cardback.jpg), flips once front is loaded
-			//   ""       → default: face-down, click to reveal
-			//
-			function displayCard(
-				card,
-				slotIndex,
-				isFoil = false,
-				slotType = "common",
-			) {
+			function displayCard(card, slotIndex, isFoil = false, slotType = "common") {
 				const cardSlot = document.getElementById(`card-slot-${slotIndex}`);
 				if (!cardSlot) return;
 
@@ -1172,78 +653,55 @@
 				const isDFC = !!card.back_image_url;
 
 				const img = document.createElement("img");
-				img.alt = "Card back";
+				img.alt   = "Card back";
 				img.title = "Click to reveal";
 
-				// Badge — driven by actual outcome
+				// Badge
 				const rarityBadge = document.createElement("div");
 				let badgeClass, badgeText;
 
 				if (isFoil) {
-					badgeClass = card.rarity;
-					badgeText = "✨";
+					badgeClass = card.rarity; badgeText = "✨";
 				} else if (slotType === "land") {
-					badgeClass = "land";
-					badgeText = "L";
+					badgeClass = "land"; badgeText = "L";
 				} else if (slotType === "list") {
-					badgeClass = "list";
-					badgeText = "📋";
+					badgeClass = "list"; badgeText = "📋";
 				} else if (slotType === "wildcard-nf") {
-					badgeClass = card.rarity;
-					badgeText = "🃏";
-				} else if (slotType === "mystery-color") {
-					badgeClass = card.rarity;
-					badgeText = card.rarity[0].toUpperCase();
-				} else if (slotType === "mystery-free") {
-					badgeClass = card.rarity;
-					badgeText = "?";
+					badgeClass = card.rarity; badgeText = "🃏";
 				} else if (slotType === "future-sight") {
-					badgeClass = "future";
-					badgeText = "🔮";
+					badgeClass = "future"; badgeText = "🔮";
 				} else if (slotType === "white-border") {
-					badgeClass = "wborder";
-					badgeText = "🤍";
+					badgeClass = "wborder"; badgeText = "🤍";
 				} else if (slotType === "playtest") {
-					badgeClass = "playtest";
-					badgeText = "🧪";
+					badgeClass = "playtest"; badgeText = "🧪";
 				} else {
-					badgeClass = card.rarity;
-					badgeText = card.rarity[0].toUpperCase();
+					badgeClass = card.rarity; badgeText = card.rarity[0].toUpperCase();
 				}
 
-				rarityBadge.className = `card-rarity rarity-${badgeClass}`;
+				rarityBadge.className   = `card-rarity rarity-${badgeClass}`;
 				rarityBadge.textContent = badgeText;
 				rarityBadge.style.display = "none";
 
-				// Send-to-player overlay
+				// Send overlay
 				const sendOverlay = document.createElement("div");
 				sendOverlay.className = "send-overlay";
-				[1, 2, 3, 4].forEach((p) => {
+				[1, 2, 3, 4].forEach(p => {
 					const btn = document.createElement("button");
 					btn.textContent = `P${p}`;
 					btn.title = `Send to Player ${p}`;
-					btn.addEventListener("click", async (e) => {
+					btn.addEventListener("click", async e => {
 						e.stopPropagation();
-						btn.disabled = true;
-						btn.textContent = "...";
+						btn.disabled = true; btn.textContent = "...";
 						try {
 							const r = await fetch(`/api/send/${p}`, {
 								method: "POST",
 								headers: { "Content-Type": "application/json" },
-								body: JSON.stringify({
-									q: card.name,
-									premium: isFoil ? "foil" : null,
-								}),
+								body: JSON.stringify({ q: card.name, premium: isFoil ? "foil" : null }),
 							});
 							btn.textContent = r.ok ? "✓" : "✗";
 							if (r.ok) showSendQr(p);
-						} catch {
-							btn.textContent = "✗";
-						}
-						setTimeout(() => {
-							btn.textContent = `P${p}`;
-							btn.disabled = false;
-						}, 1500);
+						} catch { btn.textContent = "✗"; }
+						setTimeout(() => { btn.textContent = `P${p}`; btn.disabled = false; }, 1500);
 					});
 					sendOverlay.appendChild(btn);
 				});
@@ -1257,12 +715,11 @@
 
 				function applyFaceState(index) {
 					if (index === -1) {
-						img.alt = "Card back";
-						img.title = "Click to reveal";
+						img.alt = "Card back"; img.title = "Click to reveal";
 						rarityBadge.style.display = "none";
 						cardSlot.classList.remove("foil", "revealed");
 					} else if (index === 0) {
-						img.alt = card.name;
+						img.alt   = card.name;
 						img.title = isDFC
 							? `${card.name} - click to see back face`
 							: `${card.name} - ${card.rarity}${isFoil ? " ✨" : ""}`;
@@ -1270,7 +727,7 @@
 						if (isFoil) cardSlot.classList.add("foil");
 						cardSlot.classList.add("revealed");
 					} else {
-						img.alt = `${card.name} (back face)`;
+						img.alt   = `${card.name} (back face)`;
 						img.title = `${card.name} - click to flip`;
 						rarityBadge.style.display = "";
 						if (isFoil) cardSlot.classList.add("foil");
@@ -1286,74 +743,46 @@
 				}
 
 				if (FLIP_MODE === "always") {
-					// Load the front face directly — no cardback, no animation
-					img.onload = () => {
-						img.classList.add("loaded");
-						applyFaceState(0);
-					};
+					img.onload = () => { img.classList.add("loaded"); applyFaceState(0); };
 					img.src = faces[0];
 				} else if (FLIP_MODE === "auto") {
-					// Start with cardback, flip to front as soon as it has loaded
 					img.src = "/cardback.jpg";
 					img.onload = () => img.classList.add("loaded");
-
 					const preload = new Image();
-					preload.onload = () => {
-						if (faceIndex === -1) flipTo(0);
-					};
+					preload.onload = () => { if (faceIndex === -1) flipTo(0); };
 					preload.src = faces[0];
 				} else {
-					// Default: cardback, click to reveal
 					img.src = "/cardback.jpg";
 					img.onload = () => img.classList.add("loaded");
 				}
 
-				cardSlot.addEventListener("pointerenter", (e) => {
-					if (e.pointerType === "mouse") cardSlot.classList.add("expanded");
-				});
-				cardSlot.addEventListener("pointerleave", (e) => {
-					if (e.pointerType === "mouse") cardSlot.classList.remove("expanded");
-				});
-				cardSlot.addEventListener("pointerdown", (e) => {
+				cardSlot.addEventListener("pointerenter",  e => { if (e.pointerType === "mouse") cardSlot.classList.add("expanded"); });
+				cardSlot.addEventListener("pointerleave",  e => { if (e.pointerType === "mouse") cardSlot.classList.remove("expanded"); });
+				cardSlot.addEventListener("pointerdown", e => {
 					if (e.pointerType !== "mouse") {
 						const wasExpanded = cardSlot.classList.contains("expanded");
-						document
-							.querySelectorAll(".card-slot.expanded")
-							.forEach((el) => el.classList.remove("expanded"));
-						if (!wasExpanded) {
-							cardSlot.classList.add("expanded");
-							e.stopPropagation();
-						}
+						document.querySelectorAll(".card-slot.expanded").forEach(el => el.classList.remove("expanded"));
+						if (!wasExpanded) { cardSlot.classList.add("expanded"); e.stopPropagation(); }
 					}
 				});
 				cardSlot.addEventListener("click", () => {
-					if (
-						img.classList.contains("flipping-out") ||
-						img.classList.contains("flipping-in")
-					)
-						return;
+					if (img.classList.contains("flipping-out") || img.classList.contains("flipping-in")) return;
 					if (faceIndex === -1) flipTo(0);
 					else if (isDFC) flipTo(faceIndex === 0 ? 1 : 0);
 					else flipTo(faceIndex === 0 ? -1 : 0);
 				});
 			}
 
-			document.addEventListener("pointerdown", (e) => {
+			document.addEventListener("pointerdown", e => {
 				if (!e.target.closest(".card-slot"))
-					document
-						.querySelectorAll(".card-slot.expanded")
-						.forEach((el) => el.classList.remove("expanded"));
+					document.querySelectorAll(".card-slot.expanded").forEach(el => el.classList.remove("expanded"));
 			});
 
 			function showError(message) {
-				const errorDiv = document.getElementById("error");
-				errorDiv.textContent = message;
-				errorDiv.style.display = "block";
+				const div = document.getElementById("error");
+				div.textContent = message; div.style.display = "block";
 			}
-
-			function hideError() {
-				document.getElementById("error").style.display = "none";
-			}
+			function hideError() { document.getElementById("error").style.display = "none"; }
 
 			loadSets();
 		</script>
