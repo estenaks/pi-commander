@@ -56,6 +56,18 @@ CARD_BACK_WEB_URL = "/cardback.jpg"
 
 EXCLUDED_SET_CODES = {"pred", "h17", "phtr", "punk", "klr", "h2r"}
 
+EXCLUDED_SET_KEYWORDS = {
+    "commander",
+    "jumpstart",
+    "eternal",
+    "timeshifts",
+    "big score",
+    "planechase",
+    "clue",
+    "jurassic",
+    "heroes of the realm",
+}
+
 _images_module.CARD_BACK_PATH = CARD_BACK_PATH
 _images_module.CARD_BACK_WEB_URL = CARD_BACK_WEB_URL
 _images_module.CONFIG_PORT = DEV_PORT
@@ -142,10 +154,11 @@ def api_booster_sets():
             if set_code in EXCLUDED_SET_CODES:
                 continue
 
+            if any(kw in set_name or kw in set_code for kw in EXCLUDED_SET_KEYWORDS):
+                continue
+
             if (set_name.endswith("commander") or
-                (set_name.startswith("commander") and any(ch.isdigit() for ch in set_name)) or
-                " commander" in set_name or
-                "jumpstart" in set_name):
+                (set_name.startswith("commander") and any(char.isdigit() for char in set_name))):
                 continue
 
             if set_type in ["expansion", "core", "masters", "draft_innovation",
