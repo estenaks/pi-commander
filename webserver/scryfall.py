@@ -209,8 +209,32 @@ def _get_all_sets() -> list[dict]:
     ).get("data", [])
 
 
+def _classify_color(colors: list[str], type_line: str) -> str:
+    """
+    Classify a card into one of the Mystery Booster colour-slot buckets:
+      "W" | "U" | "B" | "R" | "G" | "multi" | "colorless" | "land"
+
+    Lands (basic and non-basic) get their own bucket so they can be targeted
+    by the MB1/MB2 land slot without also appearing in colour slots.
+    """
+    if "Land" in type_line:
+        return "land"
+    if len(colors) > 1:
+        return "multi"
+    if len(colors) == 1:
+        return colors[0].upper()
+    return "colorless"
+
+
 def _get_full_set_data(set_code: str) -> list[dict]:
-    """Get all cards from a set, with permanent caching."""
+    """Get all cards from a set, with permanent caching.
+
+    Each cached card dict now includes two extra fields used for Mystery
+    Booster filtering:
+      - "color_bucket": one of "W","U","B","R","G","multi","colorless","land"
+      - "frame":        Scryfall frame string, e.g. "future", "2015", "1993" …
+      - "border_color": Scryfall border_color string, e.g. "white", "black" …
+    """
     cache_key = f"set_{set_code}_full"
 
     with _cache_lock:
@@ -239,15 +263,19 @@ def _get_full_set_data(set_code: str) -> list[dict]:
                     continue
 
                 type_line = card.get("type_line", "")
+                colors    = card.get("colors") or []
 
                 if card.get("image_uris"):
                     front_url = _pick_image_border_crop_only(card.get("image_uris", {}))
-                    back_url = None
+                    back_url  = None
                 elif card.get("card_faces") and len(card["card_faces"]) >= 2:
                     f0 = card["card_faces"][0]
                     f1 = card["card_faces"][1]
                     front_url = _pick_image_border_crop_only(f0.get("image_uris") or {})
-                    back_url = _pick_image_border_crop_only(f1.get("image_uris") or {})
+                    back_url  = _pick_image_border_crop_only(f1.get("image_uris") or {})
+                    # DFCs: use face 0 colours if top-level colours list is absent
+                    if not colors:
+                        colors = f0.get("colors") or []
                 else:
                     continue
 
@@ -255,15 +283,19 @@ def _get_full_set_data(set_code: str) -> list[dict]:
                     continue
 
                 all_cards.append({
-                    "id": card.get("id"),
-                    "name": card.get("name", "Unknown"),
-                    "image_url": front_url,
+                    "id":            card.get("id"),
+                    "name":          card.get("name", "Unknown"),
+                    "image_url":     front_url,
                     "back_image_url": back_url,
-                    "rarity": rarity,
-                    "set": set_code,
-                    "mana_cost": card.get("mana_cost", ""),
-                    "type_line": type_line,
+                    "rarity":        rarity,
+                    "set":           set_code,
+                    "mana_cost":     card.get("mana_cost", ""),
+                    "type_line":     type_line,
                     "is_common_land": (rarity == "common" and "Land" in type_line),
+                    # ── new fields ──────────────────────────────────────────
+                    "color_bucket":  _classify_color(colors, type_line),
+                    "frame":         card.get("frame", ""),
+                    "border_color":  card.get("border_color", ""),
                 })
 
             if not response.get("has_more", False):
@@ -288,6 +320,33 @@ def _get_full_set_data(set_code: str) -> list[dict]:
 def _get_cards_by_rarity_from_set(set_cards: list[dict], rarity: str) -> list[dict]:
     """Filter cards by rarity from a complete set."""
     return [card for card in set_cards if card.get("rarity") == rarity]
+
+
+def _get_cards_by_color_from_set(set_cards: list[dict], color_bucket: str) -> list[dict]:
+    """Filter cards by colour bucket (W/U/B/R/G/multi/colorless/land).
+
+    Mystery Booster colour slots exclude lands — the land slot is separate.
+    When filtering for a colour (W-G / multi / colorless), lands are excluded
+    so they can only appear via the dedicated land slot.
+    When color_bucket == "land", returns only land cards regardless of rarity.
+    """
+    return [card for card in set_cards if card.get("color_bucket") == color_bucket]
+
+
+def _get_cards_by_frame_from_set(set_cards: list[dict], frame: str) -> list[dict]:
+    """Filter cards by Scryfall frame tag, e.g. 'future'.
+
+    Used for the MB2 Future Sight frame slot.
+    """
+    return [card for card in set_cards if card.get("frame") == frame]
+
+
+def _get_cards_by_border_from_set(set_cards: list[dict], border_color: str) -> list[dict]:
+    """Filter cards by Scryfall border_color, e.g. 'white'.
+
+    Used for the MB2 white-bordered card slot.
+    """
+    return [card for card in set_cards if card.get("border_color") == border_color]
 
 
 def _select_random_cards_from_pool(card_pool: list[dict], count: int, exclude_ids: set = None) -> list[dict]:

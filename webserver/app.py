@@ -24,6 +24,9 @@ from scryfall import (
     _get_all_sets,
     _get_full_set_data,
     _get_cards_by_rarity_from_set,
+    _get_cards_by_color_from_set,
+    _get_cards_by_frame_from_set,
+    _get_cards_by_border_from_set,
     _select_random_cards_from_pool,
     _get_rare_or_mythic_card_from_set,
     _get_common_land_from_set,
@@ -32,9 +35,6 @@ import random
 import time
 
 # ---- Load .env (if present) ----------------------------------------
-# Handles dev runs where HOST/PORT/DEV_PORT are not injected by systemd.
-# Uses os.environ.setdefault so that real environment variables (e.g. from
-# the systemd service's Environment= lines) always take precedence.
 _env_path = os.path.join(os.path.dirname(__file__), ".env")
 if os.path.isfile(_env_path):
     with open(_env_path) as _f:
@@ -45,11 +45,7 @@ if os.path.isfile(_env_path):
                 os.environ.setdefault(_k.strip(), _v.strip())
 
 # ---- Config from environment ---------------------------------------
-# DEV_PORT: appended to URLs in templates / QR codes.
-#   ":8000"  → direct Flask access (dev, no nginx)
-#   ""       → nginx on port 80 (production Pi)
 DEV_PORT: str = os.environ.get("DEV_PORT", ":8000")
-
 HOST: str = os.environ.get("HOST", "0.0.0.0")
 PORT: int = int(os.environ.get("PORT", 8000))
 # --------------------------------------------------------------------
@@ -60,12 +56,12 @@ CARD_BACK_PATH = os.path.join(os.path.dirname(__file__), "cardback.jpg")
 CARD_BACK_WEB_URL = "/cardback.jpg"
 
 EXCLUDED_SET_CODES = {
-    "pred",
-    "h17",
-    "phtr",
-    "punk",
-    "klr",
-    "h2r"
+    # "pred",
+    # "h17",
+    # "phtr",
+    # "punk",
+    # "klr",
+    # "h2r"
 }
 
 # Wire path/URL constants into submodules
@@ -91,7 +87,6 @@ def _get_local_ip() -> str:
 
 LOCAL_IP = _get_local_ip()
 
-# Inject into all templates as a global
 app.jinja_env.globals["LOCAL_IP"] = LOCAL_IP
 app.jinja_env.globals["DEV_PORT"] = DEV_PORT
 
@@ -173,6 +168,11 @@ def api_booster_sets():
                 " commander" in set_name or
                 "jumpstart" in set_name or
                 "eternal" in set_name or
+                "timeshifts" in set_name or
+                "big score" in set_name or
+                "planechase" in set_name or
+                "clue" in set_name or
+                "jurassic" in set_name or
                 "heroes of the realm" in set_name):
                 continue
 
@@ -197,67 +197,108 @@ def api_booster_sets():
 
 @app.post("/api/booster/single")
 def api_booster_single_card():
-    """Get a single random card for progressive pack generation."""
+    """Get a single random card for progressive pack generation.
+
+    Request body (JSON):
+      set_code    str   required  — Scryfall set code, e.g. "mb1", "mb2", "mkm"
+      rarity      str   required  — "common" | "uncommon" | "rare" | "mythic"
+                                    | "any" | "land"
+      exclude_ids list  optional  — card IDs already used in this pack
+      color       str   optional  — colour-bucket filter for Mystery Booster
+                                    colour slots: "W"|"U"|"B"|"R"|"G"|
+                                    "multi"|"colorless"|"land"
+      frame       str   optional  — Scryfall frame filter, e.g. "future"
+                                    (used for MB2 Future Sight slot)
+      border      str   optional  — Scryfall border_color filter, e.g. "white"
+                                    (used for MB2 white-border slot)
+    """
     try:
-        payload = request.get_json(silent=True) or {}
-        set_code = payload.get("set_code", "").strip().lower()
-        rarity = payload.get("rarity", "").strip().lower()
+        payload     = request.get_json(silent=True) or {}
+        set_code    = payload.get("set_code",    "").strip().lower()
+        rarity      = payload.get("rarity",      "").strip().lower()
         exclude_ids = set(payload.get("exclude_ids", []))
+        color       = (payload.get("color")  or "").strip().upper()   # "W","U","B","R","G","multi","colorless","land"
+        frame       = (payload.get("frame")  or "").strip().lower()   # "future", ""
+        border      = (payload.get("border") or "").strip().lower()   # "white", ""
 
         if not set_code:
             return jsonify({"error": "Missing set_code parameter"}), 400
         if not rarity:
             return jsonify({"error": "Missing rarity parameter"}), 400
 
-        print(f"[booster] Fetching single {rarity} card for {set_code} (excluding {len(exclude_ids)} cards)")
+        print(f"[booster] Fetching {rarity} card for {set_code}"
+              f"{f' color={color}' if color else ''}"
+              f"{f' frame={frame}' if frame else ''}"
+              f"{f' border={border}' if border else ''}"
+              f" (excluding {len(exclude_ids)} cards)")
         start_time = time.time()
 
         set_cards = _get_full_set_data(set_code)
-
         if not set_cards:
             return jsonify({"error": f"No cards found for set {set_code}"}), 404
 
-        if rarity == "rare":
-            card = _get_rare_or_mythic_card_from_set(set_cards, exclude_ids)
-            if not card:
-                return jsonify({"error": f"No available rare or mythic cards for set {set_code}"}), 404
-            fetch_time = time.time() - start_time
-            print(f"[booster] Selected {card['rarity']} card in {fetch_time:.3f}s: {card['name']}")
-            return jsonify({"card": card, "from_cache": True, "fetch_time": round(fetch_time, 3)})
+        # ── Apply optional filters before rarity dispatch ────────────────────
+        # Each filter narrows the pool; filters stack (AND semantics).
 
-        if rarity == "land":
-            card = _get_common_land_from_set(set_cards, exclude_ids)
+        working_pool = set_cards
+
+        if color:
+            # "land" colour bucket keeps all rarities (MB1 land slot has no
+            # rarity constraint), so we skip the later rarity filter entirely.
+            working_pool = _get_cards_by_color_from_set(working_pool, color.lower())
+            if not working_pool:
+                return jsonify({"error": f"No {color} cards found for set {set_code}"}), 404
+
+        if frame:
+            working_pool = _get_cards_by_frame_from_set(working_pool, frame)
+            if not working_pool:
+                return jsonify({"error": f"No frame={frame} cards found for set {set_code}"}), 404
+
+        if border:
+            working_pool = _get_cards_by_border_from_set(working_pool, border)
+            if not working_pool:
+                return jsonify({"error": f"No border={border} cards found for set {set_code}"}), 404
+
+        # ── Rarity dispatch (operates on whatever pool filters left us) ──────
+
+        if rarity == "rare":
+            card = _get_rare_or_mythic_card_from_set(working_pool, exclude_ids)
+            if not card:
+                return jsonify({"error": f"No available rare/mythic cards for set {set_code}"}), 404
+
+        elif rarity == "land":
+            card = _get_common_land_from_set(working_pool, exclude_ids)
             if not card:
                 return jsonify({"error": f"No available land cards for set {set_code}"}), 404
-            fetch_time = time.time() - start_time
-            print(f"[booster] Selected land card in {fetch_time:.3f}s: {card['name']}")
-            return jsonify({"card": card, "from_cache": True, "fetch_time": round(fetch_time, 3)})
 
-        if rarity == "any":
-            available = [card for card in set_cards if card["id"] not in exclude_ids]
+        elif rarity == "any":
+            # "any" — pick from the full (optionally-filtered) working pool
+            available = [c for c in working_pool if c["id"] not in exclude_ids]
             if not available:
                 return jsonify({"error": f"No available cards for set {set_code}"}), 404
             card = random.choice(available)
-            fetch_time = time.time() - start_time
-            print(f"[booster] Selected premium card in {fetch_time:.3f}s: {card['name']} ({card['rarity']})")
-            return jsonify({"card": card, "from_cache": True, "fetch_time": round(fetch_time, 3)})
 
-        rarity_pool = _get_cards_by_rarity_from_set(set_cards, rarity)
-        if not rarity_pool:
-            return jsonify({"error": f"No {rarity} cards found for set {set_code}"}), 404
-
-        if rarity == "common":
-            rarity_pool = [card for card in rarity_pool if not card.get("is_common_land")]
+        else:
+            # Specific rarity: common / uncommon / mythic
+            rarity_pool = _get_cards_by_rarity_from_set(working_pool, rarity)
             if not rarity_pool:
-                return jsonify({"error": f"No non-land common cards found for set {set_code}"}), 404
+                return jsonify({"error": f"No {rarity} cards found for set {set_code}"}), 404
 
-        selected_cards = _select_random_cards_from_pool(rarity_pool, 1, exclude_ids)
-        if not selected_cards:
-            return jsonify({"error": f"No available {rarity} cards for set {set_code}"}), 404
+            if rarity == "common" and not color and not frame and not border:
+                # Standard common slot — exclude basic lands (they have their
+                # own slot). Skip this filter when a colour bucket was requested
+                # because the MB land slot intentionally wants lands.
+                rarity_pool = [c for c in rarity_pool if not c.get("is_common_land")]
+                if not rarity_pool:
+                    return jsonify({"error": f"No non-land common cards found for set {set_code}"}), 404
 
-        card = selected_cards[0]
+            selected_cards = _select_random_cards_from_pool(rarity_pool, 1, exclude_ids)
+            if not selected_cards:
+                return jsonify({"error": f"No available {rarity} cards for set {set_code}"}), 404
+            card = selected_cards[0]
+
         fetch_time = time.time() - start_time
-        print(f"[booster] Selected {rarity} card in {fetch_time:.3f}s: {card['name']}")
+        print(f"[booster] Selected {card['rarity']} card in {fetch_time:.3f}s: {card['name']}")
         return jsonify({"card": card, "from_cache": True, "fetch_time": round(fetch_time, 3)})
 
     except Exception as e:
@@ -287,7 +328,7 @@ def api_send_player(player: int):
     _require_player(player)
     payload = request.get_json(silent=True) or {}
     query = (payload.get("q") or "").strip()
-    premium = payload.get("premium") or None  # e.g. "foil" or null
+    premium = payload.get("premium") or None
     if not query:
         return jsonify({"error": "Missing JSON field 'q'"}), 400
 
@@ -302,10 +343,10 @@ def api_send_player(player: int):
 
 @app.post("/api/premium/<int:player>")
 def api_premium_player(player: int):
-    """Set or clear the premium (foil) tag for a player's current card, without re-fetching from Scryfall."""
+    """Set or clear the premium (foil) tag for a player's current card."""
     _require_player(player)
     payload = request.get_json(silent=True) or {}
-    premium = payload.get("premium") or None  # "foil" | null
+    premium = payload.get("premium") or None
 
     with _state_lock:
         if not _state_by_player[player]["card_id"]:
@@ -480,6 +521,7 @@ def _print_endpoints(host: str, port: int) -> None:
         f"    POST {base}/api/random/<player>",
         f"    GET  {base}/api/booster/sets",
         f"    POST {base}/api/booster/single",
+        f"         optional filters: color, frame, border",
         f"    POST {base}/api/send/<player>",
         "",
         "  BMP",
@@ -492,7 +534,6 @@ def _print_endpoints(host: str, port: int) -> None:
     ]
     print("\n".join(lines))
 
-    # QR code for /face in the console
     try:
         import qrcode
         face_url = f"{base}/face"

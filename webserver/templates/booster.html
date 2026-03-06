@@ -180,6 +180,19 @@
 				background: #2c7a2c;
 				color: #fff;
 			}
+			/* Mystery Booster badge colours */
+			.rarity-playtest {
+				background: #5a3a7a;
+				color: #fff;
+			}
+			.rarity-future {
+				background: #1a6b8a;
+				color: #fff;
+			}
+			.rarity-wborder {
+				background: #888;
+				color: #000;
+			}
 			.loading-text {
 				position: absolute;
 				top: 50%;
@@ -248,6 +261,10 @@
 				background: #7a3aaf;
 				color: #fff;
 			}
+			.pack-type-mystery {
+				background: #4a2060;
+				color: #e0c0ff;
+			}
 		</style>
 		<link rel="stylesheet" href="/static/card-flip.css" />
 		<link rel="stylesheet" href="/static/premium-effects.css" />
@@ -313,6 +330,10 @@
 
 			// Masters / draft_innovation sets always have a guaranteed foil slot
 			const MASTERS_SET_TYPES = new Set(["masters", "draft_innovation"]);
+
+			// Mystery Booster set codes (detected by code, not by date/type)
+			const MYSTERY_BOOSTER_1_CODES = new Set(["mb1", "cmb1"]);
+			const MYSTERY_BOOSTER_2_CODES = new Set(["mb2"]);
 
 			// ── Rarity weight tables ──────────────────────────────────────────────────
 
@@ -401,9 +422,37 @@
 			let packSize = 15;
 
 			// ── Pack profile ──────────────────────────────────────────────────────────
+			//
+			// Mystery Booster 1 (mb1) and Mystery Booster 2 (mb2) are detected by set
+			// code before any date/type checks, because their set_type is
+			// "draft_innovation" which would otherwise match the Masters branch.
+			//
 			function getPackProfile(set) {
 				const setDate = new Date(set.released_at);
 				const setType = set.set_type || "";
+				const code    = set.code ? set.code.toLowerCase() : "";
+
+				// ── Mystery Booster 1 ────────────────────────────────────────────────
+				if (MYSTERY_BOOSTER_1_CODES.has(code)) {
+					return {
+						format: "mystery1",
+						packLabel: "Mystery Booster",
+						foilGuaranteed: false,
+						foilRate: 0,
+						foilReplacesCommon: false,
+					};
+				}
+
+				// ── Mystery Booster 2 ────────────────────────────────────────────────
+				if (MYSTERY_BOOSTER_2_CODES.has(code)) {
+					return {
+						format: "mystery2",
+						packLabel: "Mystery Booster 2",
+						foilGuaranteed: false,
+						foilRate: 0,
+						foilReplacesCommon: false,
+					};
+				}
 
 				if (setDate < FOIL_DEBUT) {
 					return {
@@ -443,21 +492,30 @@
 
 			// ── Slot manifest builder ─────────────────────────────────────────────────
 			//
-			// All random decisions (foil hit? list outcome? wildcard rarities?) are
-			// resolved HERE so the grid placeholders and the generation loop are always
-			// in sync — no decision is made twice.
+			// All random decisions are resolved HERE so the grid placeholders and the
+			// generation loop are always in sync — no decision is made twice.
 			//
 			// Each slot descriptor:
-			//   { type, label, apiRarity, isFoil, setCode }
+			//   { type, label, apiRarity, isFoil, setCode, color?, frame?, border? }
 			//
-			// Play Booster slot order (matches physical pack order):
-			//   1–6  commons
-			//   7    list/CU  (resolved 4-way)
-			//   8–10 uncommons
-			//   11   rare/mythic
-			//   12   land
-			//   13   non-foil wildcard  (any rarity, non-foil)
-			//   14   foil wildcard      (any rarity, always foil)
+			// Mystery Booster 1 slot order (15 cards):
+			//   Slots 1–8:  one C/U per colour (W U B R G) + multicolour + artifact + land
+			//   Slots 9–12: four free C/U slots (any colour/type, no land)
+			//   Slot  13:   rare or mythic
+			//   Slot  14:   foil (retail) OR playtest from cmb1 (convention)
+			//   Slot  15:   playtest from cmb1 (convention only — retail packs omit this)
+			//
+			// Mystery Booster 2 slot order (15 cards):
+			//   Slots 1–10: 2× each colour (W U B R G), C/U only
+			//   Slot  11:   multicolour/artifact/land C/U
+			//   Slot  12:   rare or mythic (main MB2 pool)
+			//   Slot  13:   Future Sight frame card (60% rare/mythic, ~5% foil)
+			//   Slot  14:   white-bordered card (40% rare/mythic)
+			//   Slot  15:   playtest card (set pmb2)
+			//
+			// Play Booster slot order:
+			//   1–6  commons → 7 list/CU → 8–10 uncommons → 11 rare → 12 land
+			//   → 13 non-foil wildcard → 14 foil wildcard
 			//
 			// Draft Booster slot order:
 			//   commons (9 or 10) → uncommons → rare → foil (if hit) → land
@@ -469,6 +527,151 @@
 				const code = set.code;
 				const slots = [];
 
+				// ── Mystery Booster 1 ────────────────────────────────────────────────
+				if (profile.format === "mystery1") {
+					// Slots 1–8: one guaranteed C/U per colour bucket + multi + artifact + land
+					for (const color of ["w", "u", "b", "r", "g"]) {
+						slots.push({
+							type: "mystery-color",
+							label: color.toUpperCase(),
+							apiRarity: "common",   // endpoint picks C or U from this bucket
+							isFoil: false,
+							setCode: code,
+							color,
+						});
+					}
+					slots.push({
+						type: "mystery-color",
+						label: "Multi",
+						apiRarity: "common",
+						isFoil: false,
+						setCode: code,
+						color: "multi",
+					});
+					slots.push({
+						type: "mystery-color",
+						label: "Artifact",
+						apiRarity: "common",
+						isFoil: false,
+						setCode: code,
+						color: "colorless",
+					});
+					slots.push({
+						type: "land",
+						label: "Land",
+						apiRarity: "land",
+						isFoil: false,
+						setCode: code,
+						color: "land",
+					});
+
+					// Slots 9–12: four free C/U slots (any colour — no land)
+					for (let i = 0; i < 4; i++) {
+						slots.push({
+							type: "mystery-free",
+							label: "C/U",
+							apiRarity: "common",
+							isFoil: false,
+							setCode: code,
+						});
+					}
+
+					// Slot 13: rare or mythic
+					slots.push({
+						type: "rare",
+						label: "Rare",
+						apiRarity: "rare",
+						isFoil: false,
+						setCode: code,
+					});
+
+					// Slot 14: foil (retail) — no convention playtest support here
+					slots.push({
+						type: "foil",
+						label: "✨ Foil",
+						apiRarity: "any",
+						isFoil: true,
+						setCode: code,
+					});
+
+					return slots;
+				}
+
+				// ── Mystery Booster 2 ────────────────────────────────────────────────
+				if (profile.format === "mystery2") {
+					// Slots 1–10: 2 × each colour W U B R G, C/U only
+					for (const color of ["w", "u", "b", "r", "g"]) {
+						for (let i = 0; i < 2; i++) {
+							slots.push({
+								type: "mystery-color",
+								label: color.toUpperCase(),
+								apiRarity: "common",
+								isFoil: false,
+								setCode: code,
+								color,
+							});
+						}
+					}
+
+					// Slot 11: multi/artifact/land C/U
+					slots.push({
+						type: "mystery-color",
+						label: "Multi/Art/Land",
+						apiRarity: "common",
+						isFoil: false,
+						setCode: code,
+						color: "multi",   // backend falls back through colorless → land if needed
+					});
+
+					// Slot 12: rare or mythic (main MB2 pool)
+					slots.push({
+						type: "rare",
+						label: "Rare",
+						apiRarity: "rare",
+						isFoil: false,
+						setCode: code,
+					});
+
+					// Slot 13: Future Sight frame card
+					//   ~60% rare/mythic, ~5% foil version, ~35% C/U
+					//   We resolve rarity AND foil here.
+					const fsRoll = Math.random() * 100;
+					const fsFoil  = fsRoll < 5;                   // <5% foil
+					const fsRarity = fsRoll < 60 ? "rare" : "common"; // 60% rare/mythic
+					slots.push({
+						type: "future-sight",
+						label: fsFoil ? "✨ Future" : "🔮 Future",
+						apiRarity: fsRarity,
+						isFoil: fsFoil,
+						setCode: code,
+						frame: "future",
+					});
+
+					// Slot 14: white-bordered card
+					//   40% rare/mythic, 60% C/U
+					const wbRarity = Math.random() < 0.40 ? "rare" : "common";
+					slots.push({
+						type: "white-border",
+						label: "🤍 W-Border",
+						apiRarity: wbRarity,
+						isFoil: false,
+						setCode: code,
+						border: "white",
+					});
+
+					// Slot 15: playtest card
+					slots.push({
+						type: "playtest",
+						label: "🧪 Playtest",
+						apiRarity: "any",
+						isFoil: false,
+						setCode: "pmb2",
+					});
+
+					return slots;
+				}
+
+				// ── Play Booster ─────────────────────────────────────────────────────
 				if (profile.format === "play") {
 					for (let i = 0; i < 6; i++)
 						slots.push({
@@ -523,6 +726,8 @@
 						isFoil: true,
 						setCode: code,
 					});
+
+				// ── Masters ──────────────────────────────────────────────────────────
 				} else if (profile.format === "masters") {
 					for (let i = 0; i < 10; i++)
 						slots.push({
@@ -555,8 +760,9 @@
 						isFoil: true,
 						setCode: code,
 					});
+
+				// ── Draft / Pre-foil ─────────────────────────────────────────────────
 				} else {
-					// Draft / Pre-foil
 					const commonCount = hasFoil && profile.foilReplacesCommon ? 9 : 10;
 					for (let i = 0; i < commonCount; i++)
 						slots.push({
@@ -787,7 +993,7 @@
 				}
 			}
 
-			// ── Progressive fetch ──────────────────────────────────��──────────────────
+			// ── Progressive fetch ─────────────────────────────────────────────────────
 			async function generatePackProgressive(setCode, generation) {
 				const usedCardIds = new Set();
 				const { slots } = generation;
@@ -798,11 +1004,7 @@
 					const slot = slots[i];
 
 					try {
-						const card = await fetchSingleCard(
-							slot.setCode,
-							slot.apiRarity,
-							usedCardIds,
-						);
+						const card = await fetchSingleCard(slot, usedCardIds);
 						if (!generation.cancelled && card) {
 							displayCard(card, i, slot.isFoil, slot.type);
 							usedCardIds.add(card.id);
@@ -816,8 +1018,7 @@
 							);
 							try {
 								const card = await fetchSingleCard(
-									setCode,
-									"common",
+									{ setCode, apiRarity: "common" },
 									usedCardIds,
 								);
 								if (!generation.cancelled && card) {
@@ -830,6 +1031,29 @@
 									"Failed to fetch fallback common for land slot:",
 									fb,
 								);
+							}
+						} else if (
+							slot.type === "future-sight" ||
+							slot.type === "white-border" ||
+							slot.type === "playtest"
+						) {
+							// MB2 special slots: if the frame/border/set filter finds nothing,
+							// fall back to a plain C/U from the main set.
+							console.warn(
+								`MB2 slot ${slot.type} failed (${error.message}), falling back to C/U`,
+							);
+							try {
+								const card = await fetchSingleCard(
+									{ setCode, apiRarity: "common" },
+									usedCardIds,
+								);
+								if (!generation.cancelled && card) {
+									displayCard(card, i, false, "common");
+									usedCardIds.add(card.id);
+									generation.cardCount++;
+								}
+							} catch (fb) {
+								console.error(`Failed to fetch fallback for ${slot.type}:`, fb);
 							}
 						} else {
 							console.error(
@@ -846,17 +1070,41 @@
 			}
 
 			// ── Single-card fetch ─────────────────────────────────────────────────────
-			async function fetchSingleCard(setCode, rarity, usedCardIds = new Set()) {
+			//
+			// Accepts a full slot descriptor so it can forward color/frame/border
+			// filters to the backend for Mystery Booster slots.
+			//
+			// For Mystery Booster colour slots (mystery-color, mystery-free) the
+			// apiRarity in the manifest is "common" — but the backend's colour-bucket
+			// filter returns both commons and uncommons from that bucket.  We pick "any"
+			// when a colour filter is active so the backend doesn't further restrict to
+			// commons only.
+			//
+			async function fetchSingleCard(slot, usedCardIds = new Set()) {
+				const setCode   = slot.setCode   || slot;  // backward compat: plain string
+				const rarity    = slot.apiRarity || slot;
+				const color     = slot.color  || null;
+				const frame     = slot.frame  || null;
+				const border    = slot.border || null;
+
+				// For colour-bucket slots use "any" rarity so both C and U are eligible.
+				const effectiveRarity = color ? "any" : rarity;
+
 				const maxAttempts = 20;
 				for (let attempts = 0; attempts < maxAttempts; attempts++) {
+					const body = {
+						set_code:    setCode,
+						rarity:      effectiveRarity,
+						exclude_ids: Array.from(usedCardIds),
+					};
+					if (color)  body.color  = color;
+					if (frame)  body.frame  = frame;
+					if (border) body.border = border;
+
 					const response = await fetch("/api/booster/single", {
-						method: "POST",
+						method:  "POST",
 						headers: { "Content-Type": "application/json" },
-						body: JSON.stringify({
-							set_code: setCode,
-							rarity: rarity,
-							exclude_ids: Array.from(usedCardIds),
-						}),
+						body:    JSON.stringify(body),
 					});
 
 					if (response.status === 404) {
@@ -869,8 +1117,9 @@
 
 					const card = data.card;
 
-					// Re-roll if a non-land common slot accidentally returned a basic land
-					if (rarity === "common" && card.is_common_land) {
+					// Re-roll if a plain common slot accidentally returned a basic land
+					// (only applies when no colour filter is active)
+					if (!color && rarity === "common" && card.is_common_land) {
 						console.log(
 							`Re-rolling common land: ${card.name} (attempt ${attempts + 1})`,
 						);
@@ -882,7 +1131,7 @@
 				}
 
 				throw new Error(
-					`Failed to get non-basic ${rarity} card after ${maxAttempts} attempts`,
+					`Failed to get card after ${maxAttempts} attempts`,
 				);
 			}
 
@@ -893,9 +1142,13 @@
 			//
 			//   isFoil=true              → ✨  (card's actual rarity colour)
 			//   slotType="land"          → L   (brown)
-			//   slotType="list"          → 📋  (green)  — only when list roll hit
+			//   slotType="list"          → 📋  (green)
 			//   slotType="wildcard-nf"   → 🃏  (card's actual rarity colour)
-			//   slotType="wildcard-foil" → ✨🃏 shown as ✨ (foil takes precedence)
+			//   slotType="mystery-color" → colour initial (card's rarity colour)
+			//   slotType="mystery-free"  → ?   (card's rarity colour)
+			//   slotType="future-sight"  → 🔮  (teal)
+			//   slotType="white-border"  → 🤍  (grey)
+			//   slotType="playtest"      → 🧪  (purple)
 			//   anything else            → first letter of card's actual rarity
 			//
 			// FLIP_MODE behaviour:
@@ -938,6 +1191,21 @@
 				} else if (slotType === "wildcard-nf") {
 					badgeClass = card.rarity;
 					badgeText = "🃏";
+				} else if (slotType === "mystery-color") {
+					badgeClass = card.rarity;
+					badgeText = card.rarity[0].toUpperCase();
+				} else if (slotType === "mystery-free") {
+					badgeClass = card.rarity;
+					badgeText = "?";
+				} else if (slotType === "future-sight") {
+					badgeClass = "future";
+					badgeText = "🔮";
+				} else if (slotType === "white-border") {
+					badgeClass = "wborder";
+					badgeText = "🤍";
+				} else if (slotType === "playtest") {
+					badgeClass = "playtest";
+					badgeText = "🧪";
 				} else {
 					badgeClass = card.rarity;
 					badgeText = card.rarity[0].toUpperCase();
