@@ -53,22 +53,12 @@
 			.random-btn:hover {
 				background: #e85a2b;
 			}
-			.loading {
-				text-align: center;
-				padding: 20px;
-				font-style: italic;
-			}
 			.error {
 				color: #ff6b6b;
 				padding: 10px;
 				background: #2a1a1a;
 				border-radius: 4px;
 				margin: 10px 0;
-			}
-			.progress {
-				margin: 10px 0;
-				font-size: 14px;
-				color: #ccc;
 			}
 			.pack-grid {
 				display: grid;
@@ -98,10 +88,6 @@
 				background-size: 200% 200%;
 				animation: shimmer 1.5s infinite;
 			}
-			.card-slot.loaded {
-				border-color: #4caf50;
-				transform: scale(1.02);
-			}
 			.card-slot.expanded .card-rarity {
 				opacity: 0;
 				transition: opacity 0.2s ease;
@@ -122,9 +108,12 @@
 				}
 			}
 			.card-slot img {
+				position: absolute;
+				inset: 0;
 				width: 100%;
 				height: 100%;
 				object-fit: cover;
+				border-radius: 10px;
 				opacity: 0;
 				transition: opacity 0.3s ease;
 			}
@@ -291,11 +280,6 @@
 					id="setInfo"
 					style="margin-top: 10px; font-size: 14px; color: #ccc"
 				></div>
-				<div id="progress" class="progress" style="display: none"></div>
-			</div>
-
-			<div id="loading" class="loading" style="display: none">
-				Preparing your booster pack...
 			</div>
 
 			<div id="error" class="error" style="display: none"></div>
@@ -317,7 +301,8 @@
 			// ?flipped=always  → cards render face-up immediately, no click needed
 			// ?flipped=auto    → cards start face-down but auto-flip once front is loaded
 			// (absent)         → default: cards start face-down, click to reveal
-			const FLIP_MODE = new URLSearchParams(window.location.search).get("flipped") || "";
+			const FLIP_MODE =
+				new URLSearchParams(window.location.search).get("flipped") || "";
 
 			// ── Era cutoff dates ──────────────────────────────────────────────────────
 			const FOIL_DEBUT = new Date("1999-02-15"); // Urza's Legacy — first foils
@@ -386,7 +371,6 @@
 			function rollListCuSlot(setCode) {
 				const roll = Math.random() * 100;
 				if (roll < 87.5) {
-					// Common from set
 					return {
 						setCode,
 						apiRarity: "common",
@@ -394,7 +378,6 @@
 						label: "Common",
 					};
 				} else if (roll < 87.5 + 9.38) {
-					// List common/uncommon — equal split
 					const r = Math.random() < 0.5 ? "common" : "uncommon";
 					return {
 						setCode: "plist",
@@ -403,7 +386,6 @@
 						label: "📋 List",
 					};
 				} else {
-					// List rare/mythic (includes Special Guest)
 					const r = Math.random() < 1 / 8 ? "mythic" : "rare";
 					return {
 						setCode: "plist",
@@ -488,7 +470,6 @@
 				const slots = [];
 
 				if (profile.format === "play") {
-					// Slots 1–6: commons
 					for (let i = 0; i < 6; i++)
 						slots.push({
 							type: "common",
@@ -498,10 +479,8 @@
 							setCode: code,
 						});
 
-					// Slot 7: list/CU — resolved now
 					slots.push(rollListCuSlot(code));
 
-					// Slots 8–10: uncommons
 					for (let i = 0; i < 3; i++)
 						slots.push({
 							type: "uncommon",
@@ -511,7 +490,6 @@
 							setCode: code,
 						});
 
-					// Slot 11: guaranteed rare/mythic
 					slots.push({
 						type: "rare",
 						label: "Rare",
@@ -520,7 +498,6 @@
 						setCode: code,
 					});
 
-					// Slot 12: land
 					slots.push({
 						type: "land",
 						label: "Land",
@@ -529,7 +506,6 @@
 						setCode: code,
 					});
 
-					// Slot 13: non-foil wildcard (any rarity, weighted)
 					const nfRarity = rollWeightedRarity(PLAY_WILDCARD_NF_WEIGHTS);
 					slots.push({
 						type: "wildcard-nf",
@@ -539,7 +515,6 @@
 						setCode: code,
 					});
 
-					// Slot 14: foil wildcard (any rarity, weighted, always foil)
 					const foilRarity = rollWeightedRarity(PLAY_WILDCARD_FOIL_WEIGHTS);
 					slots.push({
 						type: "wildcard-foil",
@@ -549,7 +524,6 @@
 						setCode: code,
 					});
 				} else if (profile.format === "masters") {
-					// 10 commons, 3 uncommons, 1 rare, 1 dedicated foil (any rarity)
 					for (let i = 0; i < 10; i++)
 						slots.push({
 							type: "common",
@@ -583,7 +557,6 @@
 					});
 				} else {
 					// Draft / Pre-foil
-					// commons (9 if foil hits, else 10) → uncommons → rare → [foil] → land
 					const commonCount = hasFoil && profile.foilReplacesCommon ? 9 : 10;
 					for (let i = 0; i < commonCount; i++)
 						slots.push({
@@ -772,12 +745,12 @@
 					profile.foilGuaranteed ||
 					(profile.foilRate > 0 && Math.random() < profile.foilRate);
 
-				// Build the complete manifest — all randomness resolved upfront
 				const slots = buildSlotManifest(selectedSet, profile, hasFoil);
 				packSize = slots.length;
 
 				currentGeneration = { cancelled: false, cardCount: 0, slots };
-				showLoading(true);
+				document.getElementById("generateBtn").disabled = true;
+				document.getElementById("randomBtn").disabled = true;
 				hideError();
 				setupPackGrid(slots);
 
@@ -787,7 +760,8 @@
 					if (!currentGeneration.cancelled)
 						showError("Failed to generate pack: " + error.message);
 				} finally {
-					showLoading(false);
+					document.getElementById("generateBtn").disabled = false;
+					document.getElementById("randomBtn").disabled = false;
 					if (!currentGeneration.cancelled) currentGeneration = null;
 				}
 			}
@@ -813,9 +787,8 @@
 				}
 			}
 
-			// ── Progressive fetch ─────────────────────────────────────────────────────
+			// ── Progressive fetch ──────────────────────────────────��──────────────────
 			async function generatePackProgressive(setCode, generation) {
-				updateProgress("Starting pack generation...");
 				const usedCardIds = new Set();
 				const { slots } = generation;
 
@@ -823,9 +796,6 @@
 					if (generation.cancelled) return;
 
 					const slot = slots[i];
-					updateProgress(
-						`Fetching slot ${i + 1}/${slots.length} (${slot.label})...`,
-					);
 
 					try {
 						const card = await fetchSingleCard(
@@ -871,13 +841,7 @@
 				}
 
 				if (!generation.cancelled) {
-					updateProgress(
-						`Pack complete! ${generation.cardCount}/${packSize} cards loaded.`,
-					);
 					document.getElementById("flipAllBtn").style.display = "";
-					setTimeout(() => {
-						document.getElementById("progress").style.display = "none";
-					}, 2000);
 				}
 			}
 
@@ -1024,8 +988,6 @@
 				cardSlot.dataset.faceIndex = "-1";
 
 				function applyFaceState(index) {
-					// Update metadata without animation — used by "always" mode and
-					// as the callback target after an animated flip completes.
 					if (index === -1) {
 						img.alt = "Card back";
 						img.title = "Click to reveal";
@@ -1069,7 +1031,6 @@
 
 					const preload = new Image();
 					preload.onload = () => {
-						// Only flip if we're still on the cardback (faceIndex === -1)
 						if (faceIndex === -1) flipTo(0);
 					};
 					preload.src = faces[0];
@@ -1115,20 +1076,6 @@
 						.querySelectorAll(".card-slot.expanded")
 						.forEach((el) => el.classList.remove("expanded"));
 			});
-
-			function updateProgress(message) {
-				// const progressDiv = document.getElementById('progress');
-				// progressDiv.textContent = message;
-				// progressDiv.style.display = 'block';
-			}
-
-			function showLoading(show) {
-				document.getElementById("loading").style.display = show
-					? "block"
-					: "none";
-				document.getElementById("generateBtn").disabled = show;
-				document.getElementById("randomBtn").disabled = show;
-			}
 
 			function showError(message) {
 				const errorDiv = document.getElementById("error");
