@@ -172,7 +172,8 @@ def api_booster_sets():
                 (set_name.startswith("commander") and any(char.isdigit() for char in set_name)) or
                 " commander" in set_name or
                 "jumpstart" in set_name or
-                "etarnal" in set_name):
+                "eternal" in set_name or
+                "heroes of the realm" in set_name):
                 continue
 
             if set_type in ["expansion", "core", "masters", "draft_innovation", "commander", "funny", "starter", "eternal"]:

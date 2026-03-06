@@ -27,7 +27,6 @@ def _image_to_bmp(data: bytes) -> bytes:
         img = padded
     img = img.convert("RGB")
     img = img.rotate(90, expand=True)
-    img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
     buf = io.BytesIO()
     img.save(buf, format="BMP")
     return buf.getvalue()
@@ -99,7 +98,6 @@ def _make_config_prompt_bmp() -> bytes:
         y += 28
 
     img = img.rotate(90, expand=True)
-    img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
     buf = io.BytesIO()
     img.save(buf, format="BMP")
     return buf.getvalue()

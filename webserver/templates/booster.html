@@ -313,6 +313,12 @@
 		<script>
 			const BASE_URL = "http://{{ LOCAL_IP }}{{ DEV_PORT }}";
 
+			// ── Flip mode ─────────────────────────────────────────────────────────────
+			// ?flipped=always  → cards render face-up immediately, no click needed
+			// ?flipped=auto    → cards start face-down but auto-flip once front is loaded
+			// (absent)         → default: cards start face-down, click to reveal
+			const FLIP_MODE = new URLSearchParams(window.location.search).get("flipped") || "";
+
 			// ── Era cutoff dates ──────────────────────────────────────────────────────
 			const FOIL_DEBUT = new Date("1999-02-15"); // Urza's Legacy — first foils
 			const PLAY_BOOSTER_DEBUT = new Date("2024-02-02"); // Murders at Karlov Manor
@@ -928,6 +934,11 @@
 			//   slotType="wildcard-foil" → ✨🃏 shown as ✨ (foil takes precedence)
 			//   anything else            → first letter of card's actual rarity
 			//
+			// FLIP_MODE behaviour:
+			//   "always" → card starts face-up immediately (no animation, no click needed)
+			//   "auto"   → card starts face-down (cardback.jpg), flips once front is loaded
+			//   ""       → default: face-down, click to reveal
+			//
 			function displayCard(
 				card,
 				slotIndex,
@@ -944,7 +955,6 @@
 				const isDFC = !!card.back_image_url;
 
 				const img = document.createElement("img");
-				img.src = "/cardback.jpg";
 				img.alt = "Card back";
 				img.title = "Click to reveal";
 
@@ -1012,34 +1022,61 @@
 
 				let faceIndex = -1;
 				cardSlot.dataset.faceIndex = "-1";
-				img.onload = () => img.classList.add("loaded");
+
+				function applyFaceState(index) {
+					// Update metadata without animation — used by "always" mode and
+					// as the callback target after an animated flip completes.
+					if (index === -1) {
+						img.alt = "Card back";
+						img.title = "Click to reveal";
+						rarityBadge.style.display = "none";
+						cardSlot.classList.remove("foil", "revealed");
+					} else if (index === 0) {
+						img.alt = card.name;
+						img.title = isDFC
+							? `${card.name} - click to see back face`
+							: `${card.name} - ${card.rarity}${isFoil ? " ✨" : ""}`;
+						rarityBadge.style.display = "";
+						if (isFoil) cardSlot.classList.add("foil");
+						cardSlot.classList.add("revealed");
+					} else {
+						img.alt = `${card.name} (back face)`;
+						img.title = `${card.name} - click to flip`;
+						rarityBadge.style.display = "";
+						if (isFoil) cardSlot.classList.add("foil");
+						cardSlot.classList.add("revealed");
+					}
+					faceIndex = index;
+					cardSlot.dataset.faceIndex = String(index);
+				}
 
 				function flipTo(nextIndex) {
 					const nextSrc = nextIndex === -1 ? "/cardback.jpg" : faces[nextIndex];
-					animatedCardFlip(img, nextSrc, () => {
-						if (nextIndex === -1) {
-							img.alt = "Card back";
-							img.title = "Click to reveal";
-							rarityBadge.style.display = "none";
-							cardSlot.classList.remove("foil", "revealed");
-						} else if (nextIndex === 0) {
-							img.alt = card.name;
-							img.title = isDFC
-								? `${card.name} - click to see back face`
-								: `${card.name} - ${card.rarity}${isFoil ? " ✨" : ""}`;
-							rarityBadge.style.display = "";
-							if (isFoil) cardSlot.classList.add("foil");
-							cardSlot.classList.add("revealed");
-						} else {
-							img.alt = `${card.name} (back face)`;
-							img.title = `${card.name} - click to flip`;
-							rarityBadge.style.display = "";
-							if (isFoil) cardSlot.classList.add("foil");
-							cardSlot.classList.add("revealed");
-						}
-						faceIndex = nextIndex;
-						cardSlot.dataset.faceIndex = String(nextIndex);
-					});
+					animatedCardFlip(img, nextSrc, () => applyFaceState(nextIndex));
+				}
+
+				if (FLIP_MODE === "always") {
+					// Load the front face directly — no cardback, no animation
+					img.onload = () => {
+						img.classList.add("loaded");
+						applyFaceState(0);
+					};
+					img.src = faces[0];
+				} else if (FLIP_MODE === "auto") {
+					// Start with cardback, flip to front as soon as it has loaded
+					img.src = "/cardback.jpg";
+					img.onload = () => img.classList.add("loaded");
+
+					const preload = new Image();
+					preload.onload = () => {
+						// Only flip if we're still on the cardback (faceIndex === -1)
+						if (faceIndex === -1) flipTo(0);
+					};
+					preload.src = faces[0];
+				} else {
+					// Default: cardback, click to reveal
+					img.src = "/cardback.jpg";
+					img.onload = () => img.classList.add("loaded");
 				}
 
 				cardSlot.addEventListener("pointerenter", (e) => {
