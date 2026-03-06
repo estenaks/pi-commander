@@ -224,10 +224,13 @@ def _classify_color(colors: list[str], type_line: str) -> str:
 def _build_card_record(card: dict, set_code: str) -> dict | None:
     """Convert a raw Scryfall card object into our cached dict format.
 
-    Returns None if the card has no usable image.
+    Returns None if the card has no usable image, or if it is an
+    Arena Alchemy / Rebalanced card (is:alchemy / is:rebalanced).
     """
     rarity = card.get("rarity", "")
-    if rarity not in ["common", "uncommon", "rare", "mythic"]:
+    # "special" is used by Scryfall for Time Spiral Timeshifted cards (tsb).
+    # Allow it through so bonus-sheet pools are not empty.
+    if rarity not in ["common", "uncommon", "rare", "mythic", "special"]:
         return None
 
     type_line = card.get("type_line", "")
@@ -249,8 +252,6 @@ def _build_card_record(card: dict, set_code: str) -> dict | None:
     if not front_url:
         return None
 
-    # collector_number: Scryfall returns it as a string ("123", "123a", etc.)
-    # Store the raw string AND an integer version for range filtering.
     cn_str = card.get("collector_number", "")
     try:
         cn_int = int("".join(c for c in cn_str if c.isdigit()) or "0")
@@ -272,7 +273,6 @@ def _build_card_record(card: dict, set_code: str) -> dict | None:
         "border_color":    card.get("border_color", ""),
         "collector_number": cn_int,
     }
-
 
 def _fetch_all_pages(scryfall_query: str, cache_key: str) -> list[dict]:
     """Download every page of a Scryfall search query and cache the result.

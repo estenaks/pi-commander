@@ -236,27 +236,36 @@
 
 			// ── Bonus sheet rates ─────────────────────────────────────────────────────
 			//
-			// Keyed by main set code (lowercase).  Value = probability (0–1) that the
-			// pack contains a bonus sheet card.  Sets not listed here default to 0.
-			//
-			// 1.0  = guaranteed slot every pack (dedicated bonus slot)
-			// 0.33 = ~1-in-3 packs (Dominaria United, Murders at Karlov Manor)
-			//
-			// The actual bonus set code lives in BONUS_SHEET_MAP on the backend;
-			// this table only controls the roll — the backend does the redirect.
+			// Keyed by main set code (lowercase).  Value = probability (0–1).
+			// Sets not listed default to 0 (no bonus sheet).
 			//
 			const BONUS_SHEET_RATES = {
-				"tsp": 1.00,  // Time Spiral — timeshifted (tsb), every pack
-				"tsr": 1.00,  // Time Spiral Remastered — timeshifted (tsb)
-				"stx": 1.00,  // Strixhaven — Mystical Archive (sta)
-				"dmu": 0.33,  // Dominaria United — Legends of Dominaria (dmc)
-				"bro": 1.00,  // The Brothers' War — Retro Artifacts (brr)
-				"mom": 1.00,  // March of the Machine — Multiverse Legends (mul)
-				"woe": 1.00,  // Wilds of Eldraine — Enchanting Tales (wot)
-				"mkm": 0.33,  // Murders at Karlov Manor — Ravnica reprints (rvr)
-				"otj": 1.00,  // Outlaws of Thunder Junction — Breaking News (otp)
-				"mh3": 1.00,  // Modern Horizons 3 — New-to-Modern (m3c)
+				"tsp": 1.00,  // Time Spiral — timeshifted, every pack (extra)
+				"tsr": 1.00,  // Time Spiral Remastered — timeshifted, every pack (replaces common)
+				"stx": 1.00,  // Strixhaven — Mystical Archive (replaces common)
+				"dmu": 0.33,  // Dominaria United — Legends Retold, ~1-in-3 (extra)
+				"bro": 1.00,  // Brothers' War — Retro Artifacts (replaces common)
+				"mom": 1.00,  // March of the Machine — Multiverse Legends (replaces common)
+				"woe": 1.00,  // Wilds of Eldraine — Enchanting Tales (replaces common)
+				"mkm": 1.00,  // Murders at Karlov Manor — bonus dossier (extra) // ? verify rate
+				"otj": 1.00,  // Outlaws of Thunder Junction — Breaking News (extra)
+				"mh3": 1.00,  // Modern Horizons 3 — New-to-Modern (replaces common)
+				"blb": 1.00,  // Bloomburrow — Big Harvest (replaces common) // ? verify rate
+				"dsk": 1.00,  // Duskmourn — Featuring (extra) // ? verify rate
+				"inr": 1.00,  // Innistrad Remastered — retro reprints (replaces common) // ? verify
 			};
+
+			const BONUS_REPLACES_COMMON = new Set([
+				"tsr",  // Time Spiral Remastered timeshifted
+				"stx",  // Strixhaven Mystical Archive
+				"bro",  // Brothers' War Retro Artifacts
+				"mom",  // March of the Machine Multiverse Legends
+				"woe",  // Wilds of Eldraine Enchanting Tales
+				"mh3",  // Modern Horizons 3 New-to-Modern
+				"blb",  // Bloomburrow Big Harvest // ? verify
+				"inr",  // Innistrad Remastered retro // ? verify
+				// tsp, dmu, mkm, otj, dsk are EXTRA (16-card packs)
+			]);
 
 			function getBonusRate(setCode) {
 				return BONUS_SHEET_RATES[(setCode || "").toLowerCase()] ?? 0;
@@ -438,19 +447,22 @@
 				return slots;
 			}
 
-			// ── Slot manifest builder ─────────────────────────────────────────────────
 			function buildSlotManifest(set, profile, hasFoil) {
-				const code = set.code;
+				const code = set.code.toLowerCase();
 				const slots = [];
-				const bonusRate = getBonusRate(code);
-				const hasBonus  = bonusRate > 0 && Math.random() < bonusRate;
+				const bonusRate    = getBonusRate(code);
+				const hasBonus     = bonusRate > 0 && Math.random() < bonusRate;
+				const bonusSlot    = { type: "bonus", label: "★ Bonus", apiRarity: "any", isFoil: false, setCode: code, bonus: true };
+				const replacesCommon = BONUS_REPLACES_COMMON.has(code);
 
 				if (profile.format === "mystery2") {
 					return buildMystery2Manifest(code);
 				}
 
 				if (profile.format === "play") {
-					for (let i = 0; i < 6; i++)
+					// Play boosters: 6 commons, but drop one if bonus replaces
+					const commonCount = (hasBonus && replacesCommon) ? 5 : 6;
+					for (let i = 0; i < commonCount; i++)
 						slots.push({ type: "common", label: "Common", apiRarity: "common", isFoil: false, setCode: code });
 					slots.push(rollListCuSlot(code));
 					for (let i = 0; i < 3; i++)
@@ -461,23 +473,24 @@
 					slots.push({ type: "wildcard-nf",   label: "🃏 Wild", apiRarity: nfRarity,   isFoil: false, setCode: code });
 					const foilRarity = rollWeightedRarity(PLAY_WILDCARD_FOIL_WEIGHTS);
 					slots.push({ type: "wildcard-foil", label: "✨ Wild", apiRarity: foilRarity, isFoil: true,  setCode: code });
-					if (hasBonus)
-						slots.push({ type: "bonus", label: "★ Bonus", apiRarity: "any", isFoil: false, setCode: code, bonus: true });
+					if (hasBonus) slots.push(bonusSlot);
 
 				} else if (profile.format === "masters") {
-					for (let i = 0; i < 10; i++)
+					// Masters: 10 commons, drop one if bonus replaces
+					const commonCount = (hasBonus && replacesCommon) ? 9 : 10;
+					for (let i = 0; i < commonCount; i++)
 						slots.push({ type: "common",   label: "Common",   apiRarity: "common",   isFoil: false, setCode: code });
 					for (let i = 0; i < 3; i++)
 						slots.push({ type: "uncommon", label: "Uncommon", apiRarity: "uncommon", isFoil: false, setCode: code });
 					slots.push({ type: "rare", label: "Rare", apiRarity: "rare", isFoil: false, setCode: code });
 					const foilRarity = rollWeightedRarity(MASTERS_FOIL_WEIGHTS);
 					slots.push({ type: "foil", label: "✨ Foil", apiRarity: foilRarity, isFoil: true, setCode: code });
-					if (hasBonus)
-						slots.push({ type: "bonus", label: "★ Bonus", apiRarity: "any", isFoil: false, setCode: code, bonus: true });
+					if (hasBonus) slots.push(bonusSlot);
 
 				} else {
-					// Draft / Pre-foil
-					const commonCount = hasFoil && profile.foilReplacesCommon ? 9 : 10;
+					// Draft / Pre-foil: 10 commons (or 9 if foil replaces one), drop one more if bonus replaces
+					let commonCount = hasFoil && profile.foilReplacesCommon ? 9 : 10;
+					if (hasBonus && replacesCommon) commonCount--;
 					for (let i = 0; i < commonCount; i++)
 						slots.push({ type: "common",   label: "Common",   apiRarity: "common",   isFoil: false, setCode: code });
 					for (let i = 0; i < 3; i++)
@@ -488,8 +501,7 @@
 						slots.push({ type: "foil", label: "✨ Foil", apiRarity: foilRarity, isFoil: true, setCode: code });
 					}
 					slots.push({ type: "land", label: "Land", apiRarity: "land", isFoil: false, setCode: code });
-					if (hasBonus)
-						slots.push({ type: "bonus", label: "★ Bonus", apiRarity: "any", isFoil: false, setCode: code, bonus: true });
+					if (hasBonus) slots.push(bonusSlot);
 				}
 
 				return slots;

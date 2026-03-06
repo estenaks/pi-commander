@@ -70,37 +70,47 @@ EXCLUDED_SET_KEYWORDS = {
 
 # ── Bonus sheet mapping ──────────────────────────────────────────────────────
 #
-# Maps a main set code → the Scryfall set code of its bonus sheet pool.
-# The frontend rolls for a hit (using BONUS_SHEET_RATES in booster.html) and,
-# on a hit, sends bonus=true in the /api/booster/single request.  The backend
-# then draws from the bonus set instead of the main set.
+# Maps main set code → Scryfall set code of its bonus sheet pool.
+# Frontend rolls for a hit using BONUS_SHEET_RATES; on a hit, sends bonus=true
+# and the backend draws from the bonus pool instead of the main set.
 #
-# Only the set-code mapping lives here; rates are frontend-only so they can be
-# tuned without a server restart.
+# Confidence annotations:
+#   ✓ confirmed  – verified against Scryfall / mtg.wiki
+#   ?            – code sourced from unreliable search summaries, needs verification
+#                  against https://scryfall.com/sets or mtg.wiki/page/Bonus_sheet
 #
 BONUS_SHEET_MAP: dict[str, str] = {
-    # Time Spiral (2006) — purple-border timeshifted sheet
-    "tsp": "tsb",
-    # Time Spiral Remastered (2021) — timeshifted old-border reprints
-    "tsr": "tsb",
-    # Strixhaven (2021) — Mystical Archive
-    "stx": "sta",
-    # Dominaria United (2022) — Legends of Dominaria (foil-etched legends)
-    "dmu": "dmc",
-    # The Brothers' War (2022) — Retro Artifacts
-    "bro": "brr",
-    # March of the Machine (2023) — Multiverse Legends
-    "mom": "mul",
-    # Wilds of Eldraine (2023) — Enchanting Tales
-    "woe": "wot",
-    # Murders at Karlov Manor (2024) — Ravnica Remastered reprints
-    "mkm": "rvr",
-    # Outlaws of Thunder Junction (2024) — Breaking News
-    "otj": "otp",
-    # Modern Horizons 3 (2024) — New-to-Modern guaranteed slot
-    "mh3": "m3c",
-}
+    # ── Pre-play-booster era ────────────────────────────────────────────────
+    # Time Spiral (2006) — purple-border timeshifted, extra slot
+    "tsp": "tsb",    # ✓
+    # Time Spiral Remastered (2021) — timeshifted old-border, replaces common
+    # (user confirmed: bonus sheet is within the same set)
+    "tsr": "tsr",    # ✓ user-confirmed
 
+    # ── Play-booster / set-booster era ─────────────────────────────────────
+    # Strixhaven (2021) — Mystical Archive, replaces common
+    "stx": "sta",    # ✓
+    # Dominaria United (2022) — Legends Retold, extra slot (set/collector only)
+    "dmu": "dmc",    # ✓
+    # The Brothers' War (2022) — Retro Artifacts, replaces common
+    "bro": "brr",    # ✓
+    # March of the Machine (2023) — Multiverse Legends, replaces common
+    "mom": "mul",    # ✓
+    # Wilds of Eldraine (2023) — Enchanting Tales, replaces common
+    "woe": "wot",    # ✓
+    # Murders at Karlov Manor (2024) — bonus dossier cards, extra slot
+    "mkm": "mkc",    # ? verify: previously thought rvr, search now says mkc
+    # Outlaws of Thunder Junction (2024) — Breaking News, extra slot
+    "otj": "otp",    # ? verify: search returned otp and otb inconsistently
+    # Modern Horizons 3 (2024) — New-to-Modern, replaces common
+    "mh3": "m3c",    # ✓
+    # Bloomburrow (2024) — Big Harvest, replaces common
+    "blb": "blb",    # ? verify: no separate code confirmed; may be same set
+    # Duskmourn: House of Horror (2024) — Featuring, extra slot
+    "dsk": "spg",    # ? verify: search says spg (Special Guests umbrella code)
+    # Innistrad Remastered (2025) — retro old-border reprints, replaces common
+    "inr": "inr",    # ? verify: may be within same set like tsr
+}
 _images_module.CARD_BACK_PATH = CARD_BACK_PATH
 _images_module.CARD_BACK_WEB_URL = CARD_BACK_WEB_URL
 _images_module.CONFIG_PORT = DEV_PORT
