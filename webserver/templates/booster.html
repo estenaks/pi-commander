@@ -30,13 +30,14 @@
 			.random-btn { background: #ff6b35; }
 			.random-btn:hover { background: #e85a2b; }
 			.error { color: #ff6b6b; padding: 10px; background: #2a1a1a; border-radius: 4px; margin: 10px 0; }
-			.pack-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin-top: 20px; }
+			/* pack-grid columns are set dynamically by applyCardScaling() */
+			.pack-grid { display: grid; gap: 15px; margin-top: 20px; }
 			.card-slot {
 				aspect-ratio: 63/88; border: 2px solid #444; border-radius: 12px;
 				overflow: visible; background: #2a2a2a; position: relative;
 				transition: transform 0.25s ease, box-shadow 0.25s ease, z-index 0s;
 			}
-			/* CARD_HOVER_ZOOM is written dynamically by the script below */
+			/* .card-slot.expanded transform is set dynamically by applyCardScaling() */
 			.card-slot.loading {
 				background: linear-gradient(45deg,#2a2a2a,#3a3a3a,#2a2a2a);
 				background-size: 200% 200%; animation: shimmer 1.5s infinite;
@@ -143,19 +144,28 @@
 
 			// ── UI scaling variables ───────────────────────────────────────────────────
 			// CARD_SCALE: multiplier for the overall card size.
-			//   1.0 = original size.  Increase (e.g. 1.3) to make cards larger.
+			//   1.0 = original size (~228 px wide at 5 cols in 1200 px container).
+			//   Increase (e.g. 1.3) to make every card larger.
 			const CARD_SCALE      = 1.3;
 
-			// CARD_HOVER_ZOOM: scale() applied to a card when the mouse hovers over it.
-			//   1.18 = original zoom.  Increase for a more dramatic pop.
+			// CARD_HOVER_ZOOM: scale() applied to a card on mouse-over.
 			const CARD_HOVER_ZOOM = 1.18;
 
-			// Apply both variables to CSS at startup.
+			// Apply scaling variables to CSS at startup.
+			// The grid uses auto-fill with a min card width derived from CARD_SCALE so
+			// it naturally reflows: 5 → 4 → 3 → 2 → 1 columns as the viewport narrows.
 			(function applyCardScaling() {
 				const containerWidth = Math.round(1200 * CARD_SCALE);
+
+				// Base single-card width at scale 1.0, 5 cols, 15 px gaps:
+				//   (1200 - 4 * 15) / 5  = 228 px
+				// Multiply by CARD_SCALE so the min width tracks the chosen card size.
+				const minCardWidth = Math.round(228 * CARD_SCALE);
+
 				const style = document.createElement("style");
 				style.textContent = `
 					.container          { max-width: ${containerWidth}px; }
+					.pack-grid          { grid-template-columns: repeat(auto-fill, minmax(${minCardWidth}px, 1fr)); }
 					.card-slot.expanded { transform: scale(${CARD_HOVER_ZOOM}); z-index: 10; box-shadow: 0 12px 32px rgba(0,0,0,.7); }
 				`;
 				document.head.appendChild(style);
@@ -235,12 +245,10 @@
 			// ranked first); partial substring matches score 0 but still pass the filter.
 			//
 			function fuzzyScoreSet(set, terms) {
-				// haystack: lowercase name + 4-digit year
 				const hay = (set.name + " " + set.released_at.slice(0, 4)).toLowerCase();
 				let score = 0;
 				for (const t of terms) {
-					if (!hay.includes(t)) return null; // term missing → exclude
-					// whole-word bonus
+					if (!hay.includes(t)) return null;
 					const wordRe = new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
 					if (wordRe.test(hay)) score++;
 				}
@@ -252,16 +260,13 @@
 				const hint   = document.getElementById("searchHint");
 				const terms  = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
 
-				// Preserve current selection
 				const currentCode = select.value;
 
-				// Score + filter
 				const candidates = allSets
 					.filter(s => s.card_count > 0)
 					.map(s => ({ set: s, score: terms.length ? fuzzyScoreSet(s, terms) : 0 }))
 					.filter(({ score }) => score !== null)
 					.sort((a, b) => {
-						// Higher score first; ties broken by release date desc
 						if (b.score !== a.score) return b.score - a.score;
 						return new Date(b.set.released_at) - new Date(a.set.released_at);
 					});
@@ -275,7 +280,6 @@
 					select.appendChild(opt);
 				}
 
-				// Restore selection if it's still in the filtered list
 				if (currentCode && candidates.some(({ set }) => set.code === currentCode)) {
 					select.value = currentCode;
 				} else {
@@ -284,12 +288,9 @@
 					document.getElementById("setInfo").innerHTML = "";
 				}
 
-				// Show hit count only when searching
-				if (terms.length) {
-					hint.textContent = `${candidates.length} set${candidates.length !== 1 ? "s" : ""}`;
-				} else {
-					hint.textContent = "";
-				}
+				hint.textContent = terms.length
+					? `${candidates.length} set${candidates.length !== 1 ? "s" : ""}`
+					: "";
 			}
 
 			// ── Pack profile ──────────────────────────────────────────────────────────
@@ -298,7 +299,6 @@
 				const setType = set.set_type || "";
 				const code    = (set.code || "").toLowerCase();
 
-				// Mystery Booster 2 — must be checked BEFORE Masters (same set_type)
 				if (MYSTERY2_CODES.has(code)) {
 					return { format: "mystery2", packLabel: "Mystery Booster 2",
 					         foilGuaranteed: false, foilRate: 0, foilReplacesCommon: false };
@@ -320,31 +320,9 @@
 			}
 
 			// ── Mystery Booster 2 slot manifest ──────────────────────────────────────
-			//
-			// Card sources:
-			//   mb2_main     = e:plst date=2024-08-02  (The List reprints for MB2)
-			//   mb2 (physical) filtered by collector number:
-			//     cn  1–121  white-bordered reprints
-			//     cn 122–143 Future Sight frame C/U (non-foil only)
-			//     cn 144–242 Future Sight frame all rarities (foil-able)
-			//     cn 243–264 Future Sight frame foil-exclusives (always foil)
-			//     cn 265+    Playtest / test cards
-			//
-			// Slot layout (15 cards):
-			//   [0–9]  10 C/U from mb2_main — 2 per colour (W U B R G), shuffled
-			//   [10]   1 C/U from mb2_main  — multicolour OR artifact OR land (1-in-3 each)
-			//   [11]   1 R/M from mb2_main
-			//   [12]   1 Future Sight frame card (roll 1–100):
-			//            roll=1        → cn 243–264, isFoil=true
-			//            roll 2–4     → cn 144–242, isFoil=true
-			//            roll 5–100   → cn 122–242, isFoil=false
-			//   [13]   1 white-bordered card from mb2 cn 1–121, any rarity, no foil
-			//   [14]   1 playtest card from mb2 cn 265+, any rarity, no foil
-			//
 			function buildMystery2Manifest(code) {
 				const slots = [];
 
-				// Slots 0–9: 2× each colour C/U, shuffled
 				const colorBuckets = ["w","u","b","r","g"];
 				const colorSlots = [];
 				for (const color of colorBuckets) {
@@ -360,14 +338,12 @@
 						});
 					}
 				}
-				// Shuffle so the order is random, matching physical collation
 				for (let i = colorSlots.length - 1; i > 0; i--) {
 					const j = Math.floor(Math.random() * (i + 1));
 					[colorSlots[i], colorSlots[j]] = [colorSlots[j], colorSlots[i]];
 				}
 				slots.push(...colorSlots);
 
-				// Slot 10: multi OR artifact OR land (1-in-3)
 				const mixedColors = ["multi", "colorless", "land"];
 				const mixedColor  = mixedColors[Math.floor(Math.random() * 3)];
 				slots.push({
@@ -380,7 +356,6 @@
 					color:    mixedColor,
 				});
 
-				// Slot 11: R/M from mb2_main
 				slots.push({
 					type:     "mb2-rare",
 					label:    "Rare",
@@ -390,17 +365,13 @@
 					subtype:  "mb2_main",
 				});
 
-				// Slot 12: Future Sight frame (roll 1–100)
-				const fsRoll = Math.floor(Math.random() * 100) + 1; // 1–100
+				const fsRoll = Math.floor(Math.random() * 100) + 1;
 				let fsCnMin, fsCnMax, fsFoil;
 				if (fsRoll === 1) {
-					// 1% foil-exclusive (cn 243–264)
 					fsCnMin = 243; fsCnMax = 264; fsFoil = true;
 				} else if (fsRoll <= 5) {
-					// 2–4 → 3% foil from cn 144–242
 					fsCnMin = 144; fsCnMax = 242; fsFoil = true;
 				} else {
-					// 5–100 → 96% non-foil from cn 122–242
 					fsCnMin = 122; fsCnMax = 242; fsFoil = false;
 				}
 				slots.push({
@@ -414,7 +385,6 @@
 					cn_max:   fsCnMax,
 				});
 
-				// Slot 13: white-bordered card (cn 1–121, any rarity, no foil)
 				slots.push({
 					type:     "white-border",
 					label:    "🤍 W-Border",
@@ -426,7 +396,6 @@
 					cn_max:   121,
 				});
 
-				// Slot 14: playtest card (cn 265+, any rarity, no foil)
 				slots.push({
 					type:     "playtest",
 					label:    "🧪 Test",
@@ -473,7 +442,6 @@
 					slots.push({ type: "foil", label: "✨ Foil", apiRarity: foilRarity, isFoil: true, setCode: code });
 
 				} else {
-					// Draft / Pre-foil
 					const commonCount = hasFoil && profile.foilReplacesCommon ? 9 : 10;
 					for (let i = 0; i < commonCount; i++)
 						slots.push({ type: "common",   label: "Common",   apiRarity: "common",   isFoil: false, setCode: code });
@@ -551,7 +519,6 @@
 			}
 
 			function populateSetSelect() {
-				// Initial (unfiltered) population
 				applySetSearch("");
 
 				const select = document.getElementById("setSelect");
@@ -561,11 +528,8 @@
 					else document.getElementById("setInfo").innerHTML = "";
 				});
 
-				// Wire up the search input
 				const searchEl = document.getElementById("setSearch");
 				searchEl.addEventListener("input", () => applySetSearch(searchEl.value));
-
-				// Enter key in search box → generate pack if a set is selected
 				searchEl.addEventListener("keydown", e => {
 					if (e.key === "Enter") {
 						const code = document.getElementById("setSelect").value;
@@ -657,7 +621,6 @@
 							generation.cardCount++;
 						}
 					} catch (error) {
-						// Fallback: land → extra common; MB2 special slots → extra C/U
 						const isMb2Special = ["future-sight","white-border","playtest"].includes(slot.type);
 						if (slot.type === "land" || isMb2Special) {
 							console.warn(`Slot ${slot.type} failed (${error.message}), falling back to C/U`);
@@ -680,13 +643,6 @@
 			}
 
 			// ── Single-card fetch ─────────────────────────────────────────────────────
-			//
-			// Accepts a full slot descriptor.  Extra fields forwarded to backend:
-			//   subtype  – "mb2_main" | "mb2_frame" | "mb2_border" | "mb2_test"
-			//   color    – colour-bucket filter
-			//   cn_min   – collector-number lower bound
-			//   cn_max   – collector-number upper bound
-			//
 			async function fetchSingleCard(slot, usedCardIds = new Set()) {
 				const setCode  = typeof slot === "string" ? slot : slot.setCode;
 				const rarity   = typeof slot === "string" ? "common" : (slot.apiRarity || "any");
@@ -723,7 +679,6 @@
 
 					const card = data.card;
 
-					// Re-roll if a plain common slot got a basic land (no active filters)
 					if (!subtype && !color && rarity === "common" && card.is_common_land) {
 						console.log(`Re-rolling land: ${card.name} (attempt ${attempt + 1})`);
 						usedCardIds.add(card.id);
@@ -736,18 +691,6 @@
 			}
 
 			// ── Card display ──────────────────────────────────────────────────────────
-			//
-			// slotType → badge mapping:
-			//   isFoil=true          ✨  (rarity colour)
-			//   land                  L  (brown)
-			//   list                 📋  (green)
-			//   wildcard-nf          🃏  (rarity colour)
-			//   mb2-cu / mb2-rare     first letter of rarity (rarity colour)
-			//   future-sight         🔮  (teal)   — ✨ overrides if isFoil
-			//   white-border         🤍  (grey)
-			//   playtest             🧪  (purple)
-			//   anything else        first letter of rarity
-			//
 			function displayCard(card, slotIndex, isFoil = false, slotType = "common") {
 				const cardSlot = document.getElementById(`card-slot-${slotIndex}`);
 				if (!cardSlot) return;
@@ -762,7 +705,6 @@
 				img.alt   = "Card back";
 				img.title = "Click to reveal";
 
-				// Badge
 				const rarityBadge = document.createElement("div");
 				let badgeClass, badgeText;
 
@@ -788,7 +730,6 @@
 				rarityBadge.textContent = badgeText;
 				rarityBadge.style.display = "none";
 
-				// Send overlay
 				const sendOverlay = document.createElement("div");
 				sendOverlay.className = "send-overlay";
 				[1, 2, 3, 4].forEach(p => {
