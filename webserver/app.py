@@ -68,6 +68,39 @@ EXCLUDED_SET_KEYWORDS = {
     "heroes of the realm",
 }
 
+# ── Bonus sheet mapping ──────────────────────────────────────────────────────
+#
+# Maps a main set code → the Scryfall set code of its bonus sheet pool.
+# The frontend rolls for a hit (using BONUS_SHEET_RATES in booster.html) and,
+# on a hit, sends bonus=true in the /api/booster/single request.  The backend
+# then draws from the bonus set instead of the main set.
+#
+# Only the set-code mapping lives here; rates are frontend-only so they can be
+# tuned without a server restart.
+#
+BONUS_SHEET_MAP: dict[str, str] = {
+    # Time Spiral (2006) — purple-border timeshifted sheet
+    "tsp": "tsb",
+    # Time Spiral Remastered (2021) — timeshifted old-border reprints
+    "tsr": "tsb",
+    # Strixhaven (2021) — Mystical Archive
+    "stx": "sta",
+    # Dominaria United (2022) — Legends of Dominaria (foil-etched legends)
+    "dmu": "dmc",
+    # The Brothers' War (2022) — Retro Artifacts
+    "bro": "brr",
+    # March of the Machine (2023) — Multiverse Legends
+    "mom": "mul",
+    # Wilds of Eldraine (2023) — Enchanting Tales
+    "woe": "wot",
+    # Murders at Karlov Manor (2024) — Ravnica Remastered reprints
+    "mkm": "rvr",
+    # Outlaws of Thunder Junction (2024) — Breaking News
+    "otj": "otp",
+    # Modern Horizons 3 (2024) — New-to-Modern guaranteed slot
+    "mh3": "m3c",
+}
+
 _images_module.CARD_BACK_PATH = CARD_BACK_PATH
 _images_module.CARD_BACK_WEB_URL = CARD_BACK_WEB_URL
 _images_module.CONFIG_PORT = DEV_PORT
@@ -175,6 +208,9 @@ def api_booster_sets():
         return jsonify({
             "sets":          eligible_sets,
             "cache_size_gb": round(_get_cache_size_gb(), 2),
+            # Expose the bonus sheet map so the frontend can build its rate table
+            # against known set codes without hard-coding the backend mapping.
+            "bonus_sheet_map": BONUS_SHEET_MAP,
         })
 
     except Exception as e:
@@ -194,6 +230,8 @@ def api_booster_single_card():
       cn_max      int   optional  collector-number upper bound (inclusive)
       subtype     str   optional  "mb2_main"|"mb2_frame"|"mb2_border"|"mb2_test"
                                   Controls which MB2 pool is queried.
+      bonus       bool  optional  If true, draw from the bonus sheet for this set
+                                  (set_code must appear in BONUS_SHEET_MAP).
 
     Mystery Booster 2 routing:
       subtype=mb2_main   → pool from e:plst date=2024-08-02
@@ -210,15 +248,31 @@ def api_booster_single_card():
         cn_min      = payload.get("cn_min")   # int or None
         cn_max      = payload.get("cn_max")   # int or None
         subtype     = (payload.get("subtype") or "").strip().lower()
+        bonus       = bool(payload.get("bonus", False))
 
         if not set_code:
             return jsonify({"error": "Missing set_code"}), 400
         if not rarity:
             return jsonify({"error": "Missing rarity"}), 400
 
+        # ── Bonus sheet redirect ───────────────────────────────────────────
+        # If the caller rolled a bonus hit, swap the pool to the bonus sheet.
+        # The rarity/color/cn filters still apply to the bonus pool.
+        effective_set_code = set_code
+        is_bonus = False
+        if bonus and not subtype:
+            bonus_code = BONUS_SHEET_MAP.get(set_code)
+            if bonus_code:
+                effective_set_code = bonus_code
+                is_bonus = True
+            else:
+                # No bonus sheet registered — treat as normal draw
+                pass
+
         print(f"[booster] {set_code}/{subtype or '-'} rarity={rarity}"
               f"{f' color={color}' if color else ''}"
               f"{f' cn={cn_min}-{cn_max}' if cn_min is not None else ''}"
+              f"{' BONUS→' + effective_set_code if is_bonus else ''}"
               f" (excl {len(exclude_ids)})")
         t0 = time.time()
 
@@ -230,11 +284,11 @@ def api_booster_single_card():
             if cn_min is not None and cn_max is not None:
                 pool = _get_cards_by_cn_range(pool, int(cn_min), int(cn_max))
         else:
-            # Standard set — use existing full-set cache
-            pool = _get_full_set_data(set_code)
+            # Standard set (or bonus sheet redirect) — use full-set cache
+            pool = _get_full_set_data(effective_set_code)
 
         if not pool:
-            return jsonify({"error": f"No cards found for set {set_code} / subtype {subtype}"}), 404
+            return jsonify({"error": f"No cards found for set {effective_set_code} / subtype {subtype}"}), 404
 
         # ── Apply colour filter ────────────────────────────────────────────
         if color:
@@ -275,8 +329,9 @@ def api_booster_single_card():
             if not rarity_pool:
                 return jsonify({"error": f"No {rarity} cards available"}), 404
 
-            # Exclude basic lands from plain common slots (no colour filter active)
-            if rarity == "common" and not color and not subtype:
+            # Exclude basic lands from plain common slots (no colour filter active,
+            # no subtype, and not drawing from a bonus sheet)
+            if rarity == "common" and not color and not subtype and not is_bonus:
                 rarity_pool = [c for c in rarity_pool if not c.get("is_common_land")]
                 if not rarity_pool:
                     return jsonify({"error": "No non-land common cards available"}), 404
@@ -288,7 +343,12 @@ def api_booster_single_card():
 
         dt = time.time() - t0
         print(f"[booster] → {card['rarity']} {card['name']} ({dt:.3f}s)")
-        return jsonify({"card": card, "from_cache": True, "fetch_time": round(dt, 3)})
+        return jsonify({
+            "card":       card,
+            "from_cache": True,
+            "fetch_time": round(dt, 3),
+            "is_bonus":   is_bonus,
+        })
 
     except Exception as e:
         print(f"[booster] Error: {e}", file=sys.stderr)

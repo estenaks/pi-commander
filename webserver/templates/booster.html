@@ -234,6 +234,34 @@
 				}
 			}
 
+			// ── Bonus sheet rates ─────────────────────────────────────────────────────
+			//
+			// Keyed by main set code (lowercase).  Value = probability (0–1) that the
+			// pack contains a bonus sheet card.  Sets not listed here default to 0.
+			//
+			// 1.0  = guaranteed slot every pack (dedicated bonus slot)
+			// 0.33 = ~1-in-3 packs (Dominaria United, Murders at Karlov Manor)
+			//
+			// The actual bonus set code lives in BONUS_SHEET_MAP on the backend;
+			// this table only controls the roll — the backend does the redirect.
+			//
+			const BONUS_SHEET_RATES = {
+				"tsp": 1.00,  // Time Spiral — timeshifted (tsb), every pack
+				"tsr": 1.00,  // Time Spiral Remastered — timeshifted (tsb)
+				"stx": 1.00,  // Strixhaven — Mystical Archive (sta)
+				"dmu": 0.33,  // Dominaria United — Legends of Dominaria (dmc)
+				"bro": 1.00,  // The Brothers' War — Retro Artifacts (brr)
+				"mom": 1.00,  // March of the Machine — Multiverse Legends (mul)
+				"woe": 1.00,  // Wilds of Eldraine — Enchanting Tales (wot)
+				"mkm": 0.33,  // Murders at Karlov Manor — Ravnica reprints (rvr)
+				"otj": 1.00,  // Outlaws of Thunder Junction — Breaking News (otp)
+				"mh3": 1.00,  // Modern Horizons 3 — New-to-Modern (m3c)
+			};
+
+			function getBonusRate(setCode) {
+				return BONUS_SHEET_RATES[(setCode || "").toLowerCase()] ?? 0;
+			}
+
 			let allSets = [];
 			let currentGeneration = null;
 			let packSize = 15;
@@ -414,6 +442,8 @@
 			function buildSlotManifest(set, profile, hasFoil) {
 				const code = set.code;
 				const slots = [];
+				const bonusRate = getBonusRate(code);
+				const hasBonus  = bonusRate > 0 && Math.random() < bonusRate;
 
 				if (profile.format === "mystery2") {
 					return buildMystery2Manifest(code);
@@ -431,6 +461,8 @@
 					slots.push({ type: "wildcard-nf",   label: "🃏 Wild", apiRarity: nfRarity,   isFoil: false, setCode: code });
 					const foilRarity = rollWeightedRarity(PLAY_WILDCARD_FOIL_WEIGHTS);
 					slots.push({ type: "wildcard-foil", label: "✨ Wild", apiRarity: foilRarity, isFoil: true,  setCode: code });
+					if (hasBonus)
+						slots.push({ type: "bonus", label: "★ Bonus", apiRarity: "any", isFoil: false, setCode: code, bonus: true });
 
 				} else if (profile.format === "masters") {
 					for (let i = 0; i < 10; i++)
@@ -440,8 +472,11 @@
 					slots.push({ type: "rare", label: "Rare", apiRarity: "rare", isFoil: false, setCode: code });
 					const foilRarity = rollWeightedRarity(MASTERS_FOIL_WEIGHTS);
 					slots.push({ type: "foil", label: "✨ Foil", apiRarity: foilRarity, isFoil: true, setCode: code });
+					if (hasBonus)
+						slots.push({ type: "bonus", label: "★ Bonus", apiRarity: "any", isFoil: false, setCode: code, bonus: true });
 
 				} else {
+					// Draft / Pre-foil
 					const commonCount = hasFoil && profile.foilReplacesCommon ? 9 : 10;
 					for (let i = 0; i < commonCount; i++)
 						slots.push({ type: "common",   label: "Common",   apiRarity: "common",   isFoil: false, setCode: code });
@@ -453,6 +488,8 @@
 						slots.push({ type: "foil", label: "✨ Foil", apiRarity: foilRarity, isFoil: true, setCode: code });
 					}
 					slots.push({ type: "land", label: "Land", apiRarity: "land", isFoil: false, setCode: code });
+					if (hasBonus)
+						slots.push({ type: "bonus", label: "★ Bonus", apiRarity: "any", isFoil: false, setCode: code, bonus: true });
 				}
 
 				return slots;
@@ -657,6 +694,7 @@
 				const color    = slot.color    || null;
 				const cn_min   = slot.cn_min   != null ? slot.cn_min  : null;
 				const cn_max   = slot.cn_max   != null ? slot.cn_max  : null;
+				const bonus    = slot.bonus    || false;
 
 				const maxAttempts = 20;
 				for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -665,10 +703,11 @@
 						rarity:      rarity,
 						exclude_ids: Array.from(usedCardIds),
 					};
-					if (subtype) body.subtype = subtype;
-					if (color)   body.color   = color;
+					if (subtype)      body.subtype = subtype;
+					if (color)        body.color   = color;
 					if (cn_min !== null) body.cn_min = cn_min;
 					if (cn_max !== null) body.cn_max = cn_max;
+					if (bonus)        body.bonus   = true;
 
 					const response = await fetch("/api/booster/single", {
 						method:  "POST",
@@ -687,7 +726,7 @@
 					const card = data.card;
 
 					// Re-roll basic lands out of plain common slots (no active filters)
-					if (!subtype && !color && rarity === "common" && card.is_common_land) {
+					if (!subtype && !color && !bonus && rarity === "common" && card.is_common_land) {
 						console.log(`Re-rolling land: ${card.name} (attempt ${attempt + 1})`);
 						usedCardIds.add(card.id);
 						continue;
@@ -737,6 +776,8 @@
 					badgeClass = "wborder"; badgeText = "🤍";
 				} else if (slotType === "playtest") {
 					badgeClass = "playtest"; badgeText = "🧪";
+				} else if (slotType === "bonus") {
+					badgeClass = card.rarity; badgeText = "★";
 				} else {
 					badgeClass = card.rarity; badgeText = card.rarity[0].toUpperCase();
 				}
