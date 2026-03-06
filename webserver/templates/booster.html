@@ -22,7 +22,7 @@
 				overflow: visible; background: #2a2a2a; position: relative;
 				transition: transform 0.25s ease, box-shadow 0.25s ease, z-index 0s;
 			}
-			.card-slot.expanded { transform: scale(1.18); z-index: 10; box-shadow: 0 12px 32px rgba(0,0,0,.7); }
+			/* CARD_HOVER_ZOOM is written dynamically by the script below */
 			.card-slot.loading {
 				background: linear-gradient(45deg,#2a2a2a,#3a3a3a,#2a2a2a);
 				background-size: 200% 200%; animation: shimmer 1.5s infinite;
@@ -121,6 +121,27 @@
 		<script>
 			const BASE_URL = "http://{{ LOCAL_IP }}{{ DEV_PORT }}";
 
+			// ── UI scaling variables ───────────────────────────────────────────────────
+			// CARD_SCALE: multiplier for the overall card size.
+			//   1.0 = original size.  Increase (e.g. 1.3) to make cards larger.
+			const CARD_SCALE      = 1.3;
+
+			// CARD_HOVER_ZOOM: scale() applied to a card when the mouse hovers over it.
+			//   1.18 = original zoom.  Increase for a more dramatic pop.
+			const CARD_HOVER_ZOOM = 1.18;
+
+			// Apply both variables to CSS at startup.
+			(function applyCardScaling() {
+				// Base container width is 1200 px; multiply by CARD_SCALE.
+				const containerWidth = Math.round(1200 * CARD_SCALE);
+				const style = document.createElement("style");
+				style.textContent = `
+					.container         { max-width: ${containerWidth}px; }
+					.card-slot.expanded { transform: scale(${CARD_HOVER_ZOOM}); z-index: 10; box-shadow: 0 12px 32px rgba(0,0,0,.7); }
+				`;
+				document.head.appendChild(style);
+			})();
+
 			// ── Flip mode ─────────────────────────────────────────────────────────────
 			const FLIP_MODE = new URLSearchParams(window.location.search).get("flipped") || "";
 
@@ -170,7 +191,7 @@
 				return weights[0].rarity;
 			}
 
-			// ── Play Booster list/CU slot ─────────────────────────────────────────────
+			// ── Play Booster list/CU slot ──────────────────────────────────────────��──
 			function rollListCuSlot(setCode) {
 				const roll = Math.random() * 100;
 				if (roll < 87.5) {
