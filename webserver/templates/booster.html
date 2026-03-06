@@ -8,8 +8,22 @@
 			body { font-family: Arial, sans-serif; margin: 20px; background-color: #1a1a1a; color: #fff; }
 			.container { max-width: 1200px; margin: 0 auto; }
 			.controls { background: #2a2a2a; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-			select, button { padding: 10px; margin: 5px; border: none; border-radius: 4px; font-size: 16px; }
+			/* Row 1: search + select */
+			.controls-row1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+			/* Row 2: buttons */
+			.controls-row2 { display: flex; align-items: center; gap: 0; flex-wrap: wrap; margin-top: 10px; }
+			select, button { padding: 10px; margin: 0; border: none; border-radius: 4px; font-size: 16px; }
+			.controls-row2 button { margin-right: 5px; }
 			select { background: #3a3a3a; color: #fff; min-width: 300px; }
+			/* Fuzzy search input */
+			#setSearch {
+				padding: 10px; border: none; border-radius: 4px; font-size: 16px;
+				background: #3a3a3a; color: #fff; width: 200px;
+			}
+			#setSearch::placeholder { color: #888; }
+			#setSearch:focus { outline: 2px solid #4caf50; }
+			/* Search hit count hint */
+			#searchHint { font-size: 12px; color: #888; white-space: nowrap; }
 			button { background: #4caf50; color: white; cursor: pointer; padding: 12px 20px; }
 			button:hover { background: #45a049; }
 			button:disabled { background: #666; cursor: not-allowed; }
@@ -98,9 +112,15 @@
 		<div class="container">
 			<h1>Booster Tutor</h1>
 			<div class="controls">
-				<div>
-					<label for="setSelect">Choose a Set:</label>
+				<!-- Row 1: fuzzy search + set dropdown -->
+				<div class="controls-row1">
+					<label for="setSearch" style="white-space:nowrap">Choose a Set:</label>
+					<input id="setSearch" type="search" placeholder="Search sets…" autocomplete="off" />
 					<select id="setSelect"><option value="">Loading sets...</option></select>
+					<span id="searchHint"></span>
+				</div>
+				<!-- Row 2: action buttons -->
+				<div class="controls-row2">
 					<button id="generateBtn" disabled onclick="generatePack()">Generate Pack</button>
 					<button id="randomBtn" class="random-btn" onclick="generateRandomPack()">Random Set Pack</button>
 					<button id="flipAllBtn" style="display:none" onclick="flipAll()">Flip All</button>
@@ -132,11 +152,10 @@
 
 			// Apply both variables to CSS at startup.
 			(function applyCardScaling() {
-				// Base container width is 1200 px; multiply by CARD_SCALE.
 				const containerWidth = Math.round(1200 * CARD_SCALE);
 				const style = document.createElement("style");
 				style.textContent = `
-					.container         { max-width: ${containerWidth}px; }
+					.container          { max-width: ${containerWidth}px; }
 					.card-slot.expanded { transform: scale(${CARD_HOVER_ZOOM}); z-index: 10; box-shadow: 0 12px 32px rgba(0,0,0,.7); }
 				`;
 				document.head.appendChild(style);
@@ -191,7 +210,7 @@
 				return weights[0].rarity;
 			}
 
-			// ── Play Booster list/CU slot ──────────────────────────────────────────��──
+			// ── Play Booster list/CU slot ─────────────────────────────────────────────
 			function rollListCuSlot(setCode) {
 				const roll = Math.random() * 100;
 				if (roll < 87.5) {
@@ -208,6 +227,70 @@
 			let allSets = [];
 			let currentGeneration = null;
 			let packSize = 15;
+
+			// ── Fuzzy set search ──────────────────────────────────────────────────────
+			//
+			// Scoring: each space-separated term must appear somewhere in the haystack
+			// (set name + release year).  Score = number of whole-word matches (higher
+			// ranked first); partial substring matches score 0 but still pass the filter.
+			//
+			function fuzzyScoreSet(set, terms) {
+				// haystack: lowercase name + 4-digit year
+				const hay = (set.name + " " + set.released_at.slice(0, 4)).toLowerCase();
+				let score = 0;
+				for (const t of terms) {
+					if (!hay.includes(t)) return null; // term missing → exclude
+					// whole-word bonus
+					const wordRe = new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+					if (wordRe.test(hay)) score++;
+				}
+				return score;
+			}
+
+			function applySetSearch(query) {
+				const select = document.getElementById("setSelect");
+				const hint   = document.getElementById("searchHint");
+				const terms  = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+
+				// Preserve current selection
+				const currentCode = select.value;
+
+				// Score + filter
+				const candidates = allSets
+					.filter(s => s.card_count > 0)
+					.map(s => ({ set: s, score: terms.length ? fuzzyScoreSet(s, terms) : 0 }))
+					.filter(({ score }) => score !== null)
+					.sort((a, b) => {
+						// Higher score first; ties broken by release date desc
+						if (b.score !== a.score) return b.score - a.score;
+						return new Date(b.set.released_at) - new Date(a.set.released_at);
+					});
+
+				select.innerHTML = '<option value="">-- Choose a set --</option>';
+				for (const { set } of candidates) {
+					const opt = document.createElement("option");
+					opt.value = set.code;
+					opt.textContent = `${set.name} (${set.released_at})`;
+					opt.setAttribute("data-icon", set.icon_svg_uri || "");
+					select.appendChild(opt);
+				}
+
+				// Restore selection if it's still in the filtered list
+				if (currentCode && candidates.some(({ set }) => set.code === currentCode)) {
+					select.value = currentCode;
+				} else {
+					select.value = "";
+					document.getElementById("generateBtn").disabled = true;
+					document.getElementById("setInfo").innerHTML = "";
+				}
+
+				// Show hit count only when searching
+				if (terms.length) {
+					hint.textContent = `${candidates.length} set${candidates.length !== 1 ? "s" : ""}`;
+				} else {
+					hint.textContent = "";
+				}
+			}
 
 			// ── Pack profile ──────────────────────────────────────────────────────────
 			function getPackProfile(set) {
@@ -468,24 +551,26 @@
 			}
 
 			function populateSetSelect() {
+				// Initial (unfiltered) population
+				applySetSearch("");
+
 				const select = document.getElementById("setSelect");
-				select.innerHTML = '<option value="">-- Choose a set --</option>';
-
-				allSets
-					.filter(s => s.card_count > 0)
-					.sort((a, b) => new Date(b.released_at) - new Date(a.released_at))
-					.forEach(set => {
-						const opt = document.createElement("option");
-						opt.value = set.code;
-						opt.textContent = `${set.name} (${set.released_at})`;
-						opt.setAttribute("data-icon", set.icon_svg_uri || "");
-						select.appendChild(opt);
-					});
-
 				select.addEventListener("change", function () {
 					document.getElementById("generateBtn").disabled = !this.value;
 					if (this.value) updateSetInfo(allSets.find(s => s.code === this.value));
 					else document.getElementById("setInfo").innerHTML = "";
+				});
+
+				// Wire up the search input
+				const searchEl = document.getElementById("setSearch");
+				searchEl.addEventListener("input", () => applySetSearch(searchEl.value));
+
+				// Enter key in search box → generate pack if a set is selected
+				searchEl.addEventListener("keydown", e => {
+					if (e.key === "Enter") {
+						const code = document.getElementById("setSelect").value;
+						if (code) generatePackForSet(code);
+					}
 				});
 			}
 
