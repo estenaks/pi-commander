@@ -9,6 +9,13 @@ sudo mkdir -p /etc/lightdm/lightdm.conf.d
 sudo cp $dir/50-nocursor.conf /etc/lightdm/lightdm.conf.d/50-nocursor.conf
 sudo systemctl restart lightdm
 
+cd $dir/../webserver
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+deactivate
+
 $dir/add_nginx.sh
 $dir/add_service.sh
 
