@@ -114,7 +114,6 @@ BONUS_SHEET_MAP: dict[str, str] = {
 _images_module.CARD_BACK_PATH = CARD_BACK_PATH
 _images_module.CARD_BACK_WEB_URL = CARD_BACK_WEB_URL
 _images_module.CONFIG_PORT = DEV_PORT
-_images_module.LOCAL_IP = LOCAL_IP 
 
 _CONFIG_PROMPT_BMP, _CARD_BACK_BMP = init_fallback_bmps(CARD_BACK_PATH)
 
@@ -131,6 +130,7 @@ def _get_local_ip() -> str:
 
 
 LOCAL_IP = _get_local_ip()
+_images_module.LOCAL_IP = LOCAL_IP 
 app.jinja_env.globals["LOCAL_IP"] = LOCAL_IP
 app.jinja_env.globals["DEV_PORT"] = DEV_PORT
 
@@ -532,13 +532,61 @@ def api_config_url():
 # ── Startup ───────────────────────────────────────────────────────────────────
 
 def _print_endpoints(host: str, port: int) -> None:
-    base = f"http://{LOCAL_IP}{DEV_PORT}"
-    print(f"""
-  pi-commander running
-  {base}/booster   ← booster simulator
-  {base}/          ← player 1
-  POST {base}/api/booster/single
-""")
+    ip = LOCAL_IP
+    base = f"http://{ip}{DEV_PORT}"
+    lines = [
+        "",
+        "  pi-commander running — endpoints:",
+        "",
+        "  Browser",
+        f"    {base}/",
+        f"    {base}/face",
+        f"    {base}/player2",
+        f"    {base}/player3",
+        f"    {base}/player4",
+        f"    {base}/config",
+        f"    {base}/booster",
+        f"    {base}/cardback.jpg",
+        "",
+        "  API",
+        f"    GET  {base}/api/current/<player>",
+        f"    POST {base}/api/search/<player>",
+        f"    POST {base}/api/random/<player>",
+        f"    POST {base}/api/premium/<player>",
+        f"    POST {base}/api/send/<player>",
+        f"    GET  {base}/api/config-url",
+        f"    POST {base}/api/shutdown",
+        "",
+        "  Booster",
+        f"    GET  {base}/api/booster/sets",
+        f"    POST {base}/api/booster/single",
+        "",
+        "  BMP",
+        f"    GET  {base}/bmp/all",
+        f"    GET  {base}/bmp/1/front   {base}/bmp/1/back",
+        f"    GET  {base}/bmp/2/front   {base}/bmp/2/back",
+        f"    GET  {base}/bmp/3/front   {base}/bmp/3/back",
+        f"    GET  {base}/bmp/4/front   {base}/bmp/4/back",
+        "",
+        "  OTA",
+        f"    GET  {base}/ota/version",
+        f"    GET  {base}/ota/main.py",
+        "",
+    ]
+    print("\n".join(lines))
+
+    # QR code for /config in the console
+    try:
+        import qrcode
+        config_url = _images_module.config_url()
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(config_url)
+        qr.make(fit=True)
+        print(f"  Scan to open /config on your phone ({config_url}):")
+        qr.print_ascii(invert=True)
+        print()
+    except ImportError:
+        print(f"  /config → {base}/config  (install 'qrcode' for ASCII QR in console)\n")
 
 if __name__ == "__main__":
     with _cache_lock:
