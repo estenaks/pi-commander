@@ -16,8 +16,8 @@ import logging
 SCRIPT_DIR   = os.path.dirname(os.path.realpath(__file__))
 REPO_ROOT    = os.path.dirname(SCRIPT_DIR)
 WAVESHARE_LIB = os.path.join(
-    REPO_ROOT,
-    "RaspberryPi_JetsonNano", "python", "lib"
+    os.path.expanduser("~"),
+    "e-Paper", "RaspberryPi_JetsonNano", "python", "lib"
 )
 if os.path.exists(WAVESHARE_LIB):
     sys.path.insert(0, WAVESHARE_LIB)
