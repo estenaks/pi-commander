@@ -110,7 +110,7 @@ def floyd_steinberg_precise(img: Image.Image) -> Image.Image:
     return Image.fromarray(arr.astype(np.uint8), "RGB")
 
 
-def prepare_image(raw_bytes: bytes) -> Image.Image:
+def prepare_image(raw_bytes: bytes, precise: bool = False) -> Image.Image:
     img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
     img = img.rotate(-90, expand=True)
     src_w, src_h = img.size
@@ -124,8 +124,12 @@ def prepare_image(raw_bytes: bytes) -> Image.Image:
         canvas = Image.new("RGB", (EPD_W, EPD_H), (0, 0, 0))
         canvas.paste(img, (0, (EPD_H - new_h) // 2))
         img = canvas
-    log.info("Running dither (fast mode)…")
-    img = floyd_steinberg_fast(img)
+    if precise:
+        log.info("Running Floyd-Steinberg precise dither (foil — this takes a while)…")
+        img = floyd_steinberg_precise(img)
+    else:
+        log.info("Running Floyd-Steinberg fast dither…")
+        img = floyd_steinberg_fast(img)
     return img
 
 
@@ -159,6 +163,7 @@ def main():
     epd = epd4in01f.EPD()
 
     current_card_id = None
+    current_premium = None
 
     while True:
         if _shutdown:
@@ -169,17 +174,21 @@ def main():
             data = json.loads(raw)
 
             card_id   = data.get("card_id")
+            premium   = data.get("premium")
             faces     = data.get("faces", [])
             image_url = faces[0].get("image_url") if faces else None
 
             if not card_id or not image_url:
                 log.debug("No card set yet, waiting…")
-            elif card_id != current_card_id:
-                log.info(f"Card changed → {card_id}  url={image_url}")
+            elif card_id != current_card_id or premium != current_premium:
+                log.info(f"Card or premium changed → {card_id}  premium={premium}")
+                is_foil = premium == "foil"
+                log.info(f"Rendering: {'precise (foil)' if is_foil else 'fast'}")
                 img_bytes = fetch_bytes(image_url)
-                img       = prepare_image(img_bytes)
+                img       = prepare_image(img_bytes, precise=is_foil)
                 show_image(epd, img)
                 current_card_id = card_id
+                current_premium = premium
             else:
                 log.debug("No change.")
 
