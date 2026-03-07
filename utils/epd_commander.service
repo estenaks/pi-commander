@@ -1,0 +1,32 @@
+[Unit]
+Description=pi-commander e-paper display
+# Wait for the webserver to be up before starting — it's local so this is fast
+After=network-online.target pi-commander-webserver.service
+Wants=network-online.target
+Requires=pi-commander-webserver.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/pi-commander/epaper
+#^ adjust if not installed in ~, see README.md
+
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=/usr/bin/python3 /home/pi/pi-commander/epaper/epd_commander.py
+
+# On shutdown/stop: clear the display before exit.
+# RemainAfterExit=yes means systemd considers the service "active" even
+# after ExecStart exits, so ExecStop will actually be called on shutdown.
+ExecStop=/usr/bin/python3 /home/pi/pi-commander/epaper/epd_clear.py
+RemainAfterExit=no
+
+# Don't restart on clean exit (Ctrl+C), but do restart if it crashes
+Restart=on-failure
+RestartSec=5
+
+# Give epd_clear.py enough time to finish (the display takes ~30s to clear)
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
