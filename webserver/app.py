@@ -114,6 +114,7 @@ BONUS_SHEET_MAP: dict[str, str] = {
 _images_module.CARD_BACK_PATH = CARD_BACK_PATH
 _images_module.CARD_BACK_WEB_URL = CARD_BACK_WEB_URL
 _images_module.CONFIG_PORT = DEV_PORT
+_images_module.LOCAL_IP = LOCAL_IP 
 
 _CONFIG_PROMPT_BMP, _CARD_BACK_BMP = init_fallback_bmps(CARD_BACK_PATH)
 
@@ -522,6 +523,11 @@ def api_shutdown():
     subprocess.Popen(["sudo", "shutdown", "-h", "now"])
     return jsonify({"ok": True})
 
+# --- QR business
+
+@app.get("/api/config-url")
+def api_config_url():
+    return jsonify({"url": _images_module.config_url()})
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 

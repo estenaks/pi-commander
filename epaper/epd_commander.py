@@ -11,7 +11,8 @@ import json
 import signal
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
+import qrcode
 
 # ── Waveshare lib path ────────────────────────────────────────────────────────
 WAVESHARE_LIB = os.path.join(
@@ -24,8 +25,9 @@ if os.path.exists(WAVESHARE_LIB):
 from waveshare_epd import epd4in01f
 
 # ── Config ────────────────────────────────────────────────────────────────────
-API_URL   = "http://127.0.0.1/api/current/1"
-POLL_SECS = 5
+API_URL        = "http://127.0.0.1/api/current/1"
+CONFIG_URL_API = "http://127.0.0.1/api/config-url"
+POLL_SECS      = 5
 
 EPD_W = 640
 EPD_H = 400
@@ -133,6 +135,49 @@ def prepare_image(raw_bytes: bytes, precise: bool = False) -> Image.Image:
     return img
 
 
+def make_qr_splash(config_url: str) -> Image.Image:
+    """Generate a 640×400 black splash screen with a QR code and instructions."""
+    img  = Image.new("RGB", (EPD_W, EPD_H), (0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # QR code
+    qr = qrcode.QRCode(border=2)
+    qr.add_data(config_url)
+    qr.make(fit=True)
+    qr_img  = qr.make_image(fill_color="white", back_color="black").convert("RGB")
+    qr_size = 280
+    qr_img  = qr_img.resize((qr_size, qr_size), Image.NEAREST)
+    qr_x    = (EPD_W - qr_size) // 2
+    qr_y    = (EPD_H - qr_size) // 2 - 20
+    img.paste(qr_img, (qr_x, qr_y))
+
+    # Text
+    font_large = ImageFont.load_default(size=20)
+    font_small = ImageFont.load_default(size=15)
+
+    lines_above = [("No card configured.", font_large)]
+    lines_below = [
+        ("Scan or visit:", font_small),
+        (config_url,       font_small),
+    ]
+
+    y = qr_y - 36
+    for text, font in reversed(lines_above):
+        bbox = draw.textbbox((0, 0), text, font=font)
+        w = bbox[2] - bbox[0]
+        draw.text(((EPD_W - w) // 2, y), text, fill=(255, 255, 255), font=font)
+        y -= bbox[3] - bbox[1] + 6
+
+    y = qr_y + qr_size + 10
+    for text, font in lines_below:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        w = bbox[2] - bbox[0]
+        draw.text(((EPD_W - w) // 2, y), text, fill=(200, 200, 200), font=font)
+        y += bbox[3] - bbox[1] + 6
+
+    return img
+
+
 # ── Display helpers ───────────────────────────────────────────────────────────
 
 def show_image(epd, img: Image.Image) -> None:
@@ -164,6 +209,7 @@ def main():
 
     current_card_id = None
     current_premium = None
+    showing_qr      = False   # track whether the QR splash is on screen
 
     while True:
         if _shutdown:
@@ -179,7 +225,21 @@ def main():
             image_url = faces[0].get("image_url") if faces else None
 
             if not card_id or not image_url:
-                log.debug("No card set yet, waiting…")
+                # No card set — show QR splash if not already showing
+                if not showing_qr:
+                    log.info("No card set — showing QR splash.")
+                    try:
+                        config_url = json.loads(
+                            fetch_bytes(CONFIG_URL_API)
+                        ).get("url", "http://raspberrypi.local/config")
+                    except Exception:
+                        config_url = "http://raspberrypi.local/config"
+                    splash = make_qr_splash(config_url)
+                    show_image(epd, splash)
+                    showing_qr = True
+                else:
+                    log.debug("No card set, QR already showing.")
+
             elif card_id != current_card_id or premium != current_premium:
                 log.info(f"Card or premium changed → {card_id}  premium={premium}")
                 is_foil = premium == "foil"
@@ -189,6 +249,7 @@ def main():
                 show_image(epd, img)
                 current_card_id = card_id
                 current_premium = premium
+                showing_qr      = False
             else:
                 log.debug("No change.")
 

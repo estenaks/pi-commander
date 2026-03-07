@@ -10,6 +10,12 @@ from PIL import Image, ImageDraw, ImageFont
 CARD_BACK_PATH: str = ""
 CARD_BACK_WEB_URL: str = "/cardback.jpg"
 CONFIG_PORT: str = ""
+LOCAL_IP: str = "127.0.0.1"
+
+
+def config_url() -> str:
+    """Single source of truth for the /config URL used in all QR codes."""
+    return f"http://{LOCAL_IP}{CONFIG_PORT}/config"
 
 
 def _image_to_bmp(data: bytes) -> bytes:
@@ -64,10 +70,10 @@ def _any_to_bmp(url_or_path: str) -> bytes:
 def _make_config_prompt_bmp() -> bytes:
     """Generate a 320×480 placeholder BMP with a QR code and text
     telling the user to visit /config."""
-    config_url = f"http://raspberrypi.local{CONFIG_PORT}/config"
+    url = config_url()
 
     qr = qrcode.QRCode(border=2)
-    qr.add_data(config_url)
+    qr.add_data(url)
     qr.make(fit=True)
     qr_img = qr.make_image(fill_color="white", back_color="black").convert("RGB")
 
