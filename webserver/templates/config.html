@@ -192,6 +192,17 @@
 			>
 				✨ Foil
 			</button>
+			<button
+				id="shutdownBtn"
+				title="Shut down the Raspberry Pi"
+				style="
+					margin-left: auto;
+					border-color: rgba(255, 80, 80, 0.4);
+					color: #ff6b6b;
+				"
+			>
+				⏻ Shutdown
+			</button>
 		</div>
 
 		<div class="qrBox" aria-label="QR code for selected player view">
@@ -438,6 +449,17 @@
 				}
 				updateFoilBtn();
 			});
+			document
+				.getElementById("shutdownBtn")
+				.addEventListener("click", async () => {
+					if (!confirm("Shut down the Raspberry Pi?")) return;
+					const r = await fetch("/api/shutdown", { method: "POST" });
+					if (r.ok) {
+						statusEl.textContent = "Shutting down…";
+					} else {
+						statusEl.textContent = "Shutdown failed.";
+					}
+				});
 
 			// initial
 			renderPlayerQr();

@@ -517,6 +517,11 @@ def ota_main():
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return send_file(os.path.join(repo_root, "pico", "main.py"), mimetype="text/plain")
 
+@app.post("/api/shutdown")
+def api_shutdown():
+    subprocess.Popen(["sudo", "shutdown", "-h", "now"])
+    return jsonify({"ok": True})
+
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
