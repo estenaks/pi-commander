@@ -162,7 +162,8 @@ def prepare_image(raw_bytes: bytes) -> Image.Image:
         img = canvas
 
     log.info("Running dither (fast mode)…")
-    img = floyd_steinberg_fast(img)   # ← swap to floyd_steinberg_precise for production
+    #img = floyd_steinberg_fast(img)   # ← swap to floyd_steinberg_precise for production
+    img = floyd_steinberg_precise(img)
     return img
 
 
