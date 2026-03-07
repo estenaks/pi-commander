@@ -3,6 +3,8 @@ set -euo pipefail
 
 URL="http://127.0.0.1/face?rotate=1"
 # ^ if display is landscape this shows image in portrait
+URL="http://127.0.0.1/config"
+# ^ overwrite since using epaper display
 
 # If you're on the desktop (X11), these help Chromium start from cron/autostart
 export DISPLAY=:0
