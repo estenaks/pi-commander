@@ -38,7 +38,7 @@ def _image_to_bmp(data: bytes) -> bytes:
         padded.paste(img, ((DISPLAY_W - new_w) // 2, 0))
         img = padded
     img = img.convert("RGB")
-    img = img.rotate(90, expand=True)
+    # img = img.rotate(90, expand=True)
     buf = io.BytesIO()
     img.save(buf, format="BMP")
     return buf.getvalue()
@@ -63,7 +63,7 @@ def _image_to_strips(data: bytes) -> list[bytes]:
         padded.paste(img, ((DISPLAY_W - new_w) // 2, 0))
         img = padded
     img = img.convert("RGB")
-    img = img.rotate(90, expand=True)   # now 320 wide, 480 tall
+    # img = img.rotate(90, expand=True)   # now 320 wide, 480 tall
 
     strips = []
     num_strips = DISPLAY_H // STRIP_H
