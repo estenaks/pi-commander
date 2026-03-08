@@ -561,6 +561,48 @@ def ota_main():
 def api_config_url():
     return jsonify({"url": _images_module.config_url()})
 
+# --- Pico business
+
+from images import _any_to_strips, init_fallback_strips
+
+# in startup, alongside the existing BMP fallbacks:
+_CONFIG_PROMPT_STRIPS, _CARD_BACK_STRIPS = init_fallback_strips(CARD_BACK_PATH)
+
+# pre-converted strip cache alongside _bmp_cache
+_strip_cache: dict[tuple[int, str], list[bytes]] = {}
+
+
+def _get_strips_for_player(player: int, face: str) -> list[bytes]:
+    with _state_lock:
+        strips = _strip_cache.get((player, face))
+    return strips if strips is not None else _CONFIG_PROMPT_STRIPS
+
+
+@app.get("/img/<int:player>/<face>/raw")
+def img_strip(player: int, face: str):
+    """Serve one 320×160 RGB565 strip (byte-swapped).
+    ?strip=0  → rows   0-159
+    ?strip=1  → rows 160-319
+    ?strip=2  → rows 320-479
+    Content-Type: application/octet-stream
+    Content-Length is always 320*160*2 = 102400 bytes.
+    """
+    _require_player(player)
+    if face not in ("front", "back"):
+        return jsonify({"error": "face must be front or back"}), 400
+    try:
+        strip_idx = int(request.args.get("strip", 0))
+    except ValueError:
+        return jsonify({"error": "strip must be 0, 1 or 2"}), 400
+    if strip_idx not in (0, 1, 2):
+        return jsonify({"error": "strip must be 0, 1 or 2"}), 400
+
+    strips = _get_strips_for_player(player, face)
+    return strips[strip_idx], 200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": str(len(strips[strip_idx])),
+    }
+
 # ── Startup ───────────────────────────────────────────────────────────────────
 
 def _print_endpoints(host: str, port: int) -> None:
