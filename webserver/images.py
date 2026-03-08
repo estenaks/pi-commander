@@ -44,11 +44,12 @@ def _image_to_bmp(data: bytes) -> bytes:
 
 
 def _image_to_strips(data: bytes) -> list[bytes]:
-    """Convert image bytes to a list of raw RGB565 strips (byte-swapped for display).
+    """Convert image bytes to a list of raw RGB565 strips for the ILI9488 in BGR mode.
 
     Returns a list of 3 strips, each DISPLAY_W * STRIP_H * 2 bytes.
-    Pixels are in RGB565 little-endian (byte-swapped) matching bs(rgb(r,g,b))
-    from test_display.py: standard RGB565 word stored low-byte-first.
+    Pixels are packed as BGR565 little-endian: B in bits 15-11, G in 10-5, R in 4-0,
+    stored low-byte-first. The display's MADCTL BGR bit swaps R and B in hardware,
+    so sending B in the high bits produces the correct colour on screen.
     """
     img = Image.open(io.BytesIO(data))
     orig_w, orig_h = img.size
@@ -72,15 +73,15 @@ def _image_to_strips(data: bytes) -> list[bytes]:
         strip_img = img.crop((0, y0, DISPLAY_W, y1))
         pixels = strip_img.tobytes()  # RGB888, row-major
 
-        # Convert RGB888 -> RGB565 byte-swapped (matches test_display.py bs(rgb(r,g,b)))
+        # BGR565 little-endian: B in high bits to match display's hardware BGR swap
         out = bytearray(DISPLAY_W * STRIP_H * 2)
         j = 0
         for i in range(0, len(pixels), 3):
             r = pixels[i]
             g = pixels[i + 1]
             b = pixels[i + 2]
-            rgb565 = (r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)
-            out[j]     = rgb565 & 0xFF         # low byte first (byte-swap)
+            rgb565 = (b >> 3) << 11 | (g >> 2) << 5 | (r >> 3)
+            out[j]     = rgb565 & 0xFF         # low byte first
             out[j + 1] = (rgb565 >> 8) & 0xFF
             j += 2
 
@@ -119,7 +120,7 @@ def _any_to_bmp(url_or_path: str) -> bytes:
 
 
 def _any_to_strips(url_or_path: str) -> list[bytes]:
-    """Convert either a remote URL or local path to RGB565 strips."""
+    """Convert either a remote URL or local path to BGR565 strips."""
     if url_or_path == CARD_BACK_WEB_URL:
         with open(CARD_BACK_PATH, "rb") as f:
             data = f.read()
@@ -179,7 +180,7 @@ def _make_config_prompt_bmp() -> bytes:
 
 
 def _make_config_prompt_strips() -> list[bytes]:
-    """Generate config prompt as RGB565 strips."""
+    """Generate config prompt as BGR565 strips."""
     bmp = _make_config_prompt_bmp()
     return _image_to_strips(bmp)
 
