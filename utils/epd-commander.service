@@ -11,7 +11,8 @@ WorkingDirectory=/home/pi/pi-commander/epaper
 
 Environment=PYTHONUNBUFFERED=1
 
-ExecStart=/usr/bin/python3 /home/pi/pi-commander/epaper/epd_commander.py
+ExecStartPre=/usr/bin/curl -s http://127.0.0.1/config
+ExecStart=/home/pi/pi-commander/epaper/.venv/bin/python3 /home/pi/pi-commander/epaper/epd_commander.py
 
 Restart=on-failure
 RestartSec=5
