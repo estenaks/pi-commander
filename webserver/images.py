@@ -21,8 +21,6 @@ DISPLAY_H = 480
 
 # ---------------------------------------------------------------------------
 # Palette — the 16 named colours from test_display.py, in RGB888.
-# These are the ONLY colours the Pico will ever receive, so we know exactly
-# how each one must be encoded.
 # ---------------------------------------------------------------------------
 _PALETTE_RGB = [
     (  0,   0,   0),   # BLACK
@@ -43,41 +41,60 @@ _PALETTE_RGB = [
     (  0, 128,   0),   # LIME
 ]
 
+_PALETTE_NP = np.array(_PALETTE_RGB, dtype=np.int32)  # (16, 3)
+
 def _bs(c: int) -> int:
-    """Byte-swap a 16-bit value — matches bs() in test_display.py."""
     return ((c & 0xFF) << 8) | (c >> 8)
 
 def _rgb565(r: int, g: int, b: int) -> int:
-    """Pack RGB888 → RGB565 word, then byte-swap — matches rgb() in test_display.py."""
     return _bs(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3))
 
-# Pre-compute the 2-byte little-endian framebuffer word for each palette entry.
-# Index i → bytes to write into lcd.buffer for that colour.
 _PALETTE_WORDS: list[bytes] = []
 for _r, _g, _b in _PALETTE_RGB:
     _w = _rgb565(_r, _g, _b)
     _PALETTE_WORDS.append(bytes([_w & 0xFF, (_w >> 8) & 0xFF]))
 
-# Build a PIL palette image (needed for quantize())
-_PIL_PALETTE_IMG = Image.new("P", (1, 1))
-_flat = []
-for _r, _g, _b in _PALETTE_RGB:
-    _flat += [_r, _g, _b]
-# PIL palette must be 768 bytes (256 × 3); pad with zeros
-_flat += [0] * (768 - len(_flat))
-_PIL_PALETTE_IMG.putpalette(_flat)
+# numpy LUT: shape (16, 2) — palette index → [lo, hi] framebuffer bytes
+_PALETTE_LUT = np.array([[w[0], w[1]] for w in _PALETTE_WORDS], dtype=np.uint8)
+
+
+# ---------------------------------------------------------------------------
+# Dithering — precise Floyd-Steinberg, ported from epd_commander.py
+# Full 4-neighbour error diffusion: 7/16 right, 3/16 below-left,
+# 5/16 below, 1/16 below-right. Pixel-by-pixel for maximum quality.
+# Returns palette indices array of shape (DISPLAY_H, DISPLAY_W), dtype uint8.
+# ---------------------------------------------------------------------------
+
+def _floyd_steinberg_precise(img: Image.Image) -> np.ndarray:
+    arr     = np.array(img.convert("RGB"), dtype=np.int32)  # (H, W, 3)
+    h, w    = arr.shape[:2]
+    indices = np.zeros((h, w), dtype=np.uint8)
+
+    for y in range(h):
+        for x in range(w):
+            old  = arr[y, x].copy()
+            diff = _PALETTE_NP - old                        # (16, 3)
+            idx  = (diff ** 2).sum(axis=1).argmin()
+            new  = _PALETTE_NP[idx]
+            arr[y, x]  = new
+            indices[y, x] = idx
+            err = old - new
+            if x + 1 < w:
+                arr[y,     x + 1] += err * 7 // 16
+            if y + 1 < h:
+                if x > 0:
+                    arr[y + 1, x - 1] += err * 3 // 16
+                arr[y + 1, x    ]     += err * 5 // 16
+                if x + 1 < w:
+                    arr[y + 1, x + 1] += err * 1 // 16
+        arr[y] = np.clip(arr[y], 0, 255)
+
+    return indices
 
 
 def config_url() -> str:
     """Single source of truth for the /config URL used in all QR codes."""
     return f"http://{LOCAL_IP}{CONFIG_PORT}/config"
-
-
-def _quantize_to_palette(img: Image.Image) -> Image.Image:
-    """Floyd-Steinberg dither img down to _PALETTE_RGB using PIL's quantize()."""
-    img = img.convert("RGB")
-    # quantize() with a palette image uses the supplied palette and dithers with F-S
-    return img.quantize(palette=_PIL_PALETTE_IMG, dither=Image.Dither.FLOYDSTEINBERG)
 
 
 def _fit_image(data: bytes) -> Image.Image:
@@ -105,34 +122,22 @@ def _image_to_bmp(data: bytes) -> bytes:
 
 
 def _image_to_strips(data: bytes) -> list[bytes]:
-    """Dither image to the 16-colour Pico palette, then encode as BGR565 strips.
+    """Precise Floyd-Steinberg dither to the 16-colour Pico palette, encode as strips.
 
     Each strip is DISPLAY_W * STRIP_H * 2 bytes.
-    Every pixel is one of the 16 known-good palette entries, encoded with the
-    exact same bs(rgb(r,g,b)) formula used in test_display.py — so colours are
-    guaranteed to match what the test demo produces.
+    Every pixel is one of the 16 known-good palette entries, encoded with
+    bs(rgb(r,g,b)) — identical to test_display.py.
     """
-    img = _fit_image(data)
-    quantized = _quantize_to_palette(img)  # palette-indexed, Floyd-Steinberg dithered
+    img     = _fit_image(data)
+    indices = _floyd_steinberg_precise(img)     # (DISPLAY_H, DISPLAY_W), uint8
 
-    # Convert palette indices to the pre-computed 2-byte framebuffer words using numpy
-    indices = np.frombuffer(quantized.tobytes(), dtype=np.uint8)  # DISPLAY_W * DISPLAY_H values
-
-    # Build lookup: index → [lo, hi]
-    lut = np.zeros((256, 2), dtype=np.uint8)
-    for i, word_bytes in enumerate(_PALETTE_WORDS):
-        lut[i, 0] = word_bytes[0]
-        lut[i, 1] = word_bytes[1]
-
-    # Map every pixel index to its 2-byte word
-    pixels_2b = lut[indices]  # shape: (DISPLAY_W * DISPLAY_H, 2)
+    # Map palette indices → 2-byte framebuffer words via LUT: (H, W, 2)
+    pixels_2b = _PALETTE_LUT[indices]
 
     strips = []
-    num_strips = DISPLAY_H // STRIP_H
-    strip_px = DISPLAY_W * STRIP_H
-    for s in range(num_strips):
-        strip_data = pixels_2b[s * strip_px:(s + 1) * strip_px]
-        strips.append(bytes(strip_data.flatten()))
+    for s in range(DISPLAY_H // STRIP_H):
+        strip = pixels_2b[s * STRIP_H:(s + 1) * STRIP_H]  # (STRIP_H, W, 2)
+        strips.append(bytes(strip.reshape(-1)))
 
     return strips
 
