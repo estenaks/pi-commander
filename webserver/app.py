@@ -7,7 +7,7 @@ import threading
 import urllib.parse
 from datetime import date
 
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, after_this_request
 
 import cache as _cache_module
 import images as _images_module
@@ -16,6 +16,7 @@ from images import _any_to_bmp, init_fallback_bmps
 from scryfall import (
     PLAYERS,
     _bmp_cache,
+    _strip_cache, 
     _state_lock,
     _state_by_player,
     _require_player,
@@ -602,6 +603,16 @@ def img_strip(player: int, face: str):
         "Content-Type": "application/octet-stream",
         "Content-Length": str(len(strips[strip_idx])),
     }
+
+
+@app.after_request
+def add_cors(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
+
+@app.get("/strip-viewer")
+def strip_viewer():
+    return send_file(os.path.join(os.path.dirname(os.path.dirname(__file__)), "pico", "strip_viewer.html"))
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 

@@ -14,7 +14,7 @@ from cache import (
     _get_cached_data,
     _set_cached_data,
 )
-from images import CARD_BACK_WEB_URL, _any_to_bmp
+from images import CARD_BACK_WEB_URL, _any_to_bmp, _any_to_strips
 
 SCRYFALL_REQUEST_DELAY = 0.050  # 50ms between requests
 
@@ -33,6 +33,7 @@ _state_by_player = {
 }
 
 _bmp_cache: dict[tuple[int, str], bytes] = {}
+_strip_cache: dict[tuple[int, str], list[bytes]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -162,9 +163,11 @@ def _generate_bmps(player: int) -> None:
     for face, url in (("front", front_url), ("back", back_url)):
         try:
             bmp_bytes = _any_to_bmp(url)
+            strips = _any_to_strips(url)
             with _state_lock:
                 if _state_by_player[player]["card_id"] == card_id:
                     _bmp_cache[(player, face)] = bmp_bytes
+                    _strip_cache[(player, face)] = strips
         except Exception as exc:
             print(f"[bmp] Error generating {face} BMP for player {player}: {exc}", file=sys.stderr)
 

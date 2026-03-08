@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>pi-commander strip viewer</title>
+  <style>
+    body { background: #111; color: #eee; font-family: monospace; margin: 20px; }
+    #controls { margin-bottom: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    button { background: #333; color: #eee; border: 1px solid #555; padding: 6px 14px;
+             cursor: pointer; font-family: monospace; font-size: 14px; }
+    button:hover { background: #555; }
+    button.active { background: #226; border-color: #66f; }
+    select, input { background: #222; color: #eee; border: 1px solid #555;
+                    padding: 4px 8px; font-family: monospace; font-size: 14px; }
+    #status { margin-bottom: 8px; color: #aaa; min-height: 20px; }
+    #canvases { display: flex; flex-direction: column; gap: 2px; }
+    canvas { display: block; image-rendering: pixelated; }
+    #log { margin-top: 12px; color: #666; font-size: 12px; max-height: 120px;
+           overflow-y: auto; white-space: pre; }
+  </style>
+</head>
+<body>
+  <h2>pi-commander strip viewer</h2>
+
+  <div id="controls">
+    <label>Server <input id="server" value="http://172.0.0.1:8000" size="28"></label>
+    <label>Player
+      <select id="player">
+        <option>1</option><option selected>2</option><option>3</option><option>4</option>
+      </select>
+    </label>
+    <label>Face
+      <select id="face">
+        <option selected>front</option><option>back</option>
+      </select>
+    </label>
+    <button id="btnFetch" onclick="fetchStrips()">⟳ Fetch strips</button>
+    <button onclick="fetchBmp()">⟳ Fetch BMP</button>
+  </div>
+
+  <div id="status">Ready.</div>
+
+  <!-- 3 strip canvases stacked = 320×480 portrait -->
+  <div id="canvases">
+    <canvas id="c0" width="320" height="160"></canvas>
+    <canvas id="c1" width="320" height="160"></canvas>
+    <canvas id="c2" width="320" height="160"></canvas>
+  </div>
+
+  <!-- BMP comparison canvas (hidden until fetched) -->
+  <canvas id="cbmp" width="320" height="480" style="display:none; margin-top:12px;"></canvas>
+
+  <div id="log"></div>
+
+<script>
+const log = (msg) => {
+  const el = document.getElementById('log');
+  el.textContent += msg + '\n';
+  el.scrollTop = el.scrollHeight;
+  console.log(msg);
+};
+
+const status = (msg) => {
+  document.getElementById('status').textContent = msg;
+  log(msg);
+};
+
+// Decode one raw RGB565 byte-swapped strip into ImageData
+function decodeStrip(buf, width, height) {
+  const view = new DataView(buf);
+  const img  = new ImageData(width, height);
+  for (let i = 0; i < width * height; i++) {
+    const lo  = view.getUint8(i * 2);
+    const hi  = view.getUint8(i * 2 + 1);
+    const px  = (hi << 8) | lo;          // undo byte-swap
+    img.data[i * 4 + 0] = ((px >> 11) & 0x1F) << 3;   // R
+    img.data[i * 4 + 1] = ((px >>  5) & 0x3F) << 2;   // G
+    img.data[i * 4 + 2] = ( px        & 0x1F) << 3;   // B
+    img.data[i * 4 + 3] = 255;
+  }
+  return img;
+}
+
+async function fetchStrips() {
+  const server = document.getElementById('server').value.replace(/\/$/, '');
+  const player = document.getElementById('player').value;
+  const face   = document.getElementById('face').value;
+
+  document.getElementById('cbmp').style.display = 'none';
+
+  for (let s = 0; s < 3; s++) {
+    const url = `${server}/img/${player}/${face}/raw?strip=${s}`;
+    status(`Fetching strip ${s+1}/3…`);
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) { status(`strip ${s}: HTTP ${resp.status}`); continue; }
+      const buf  = await resp.arrayBuffer();
+      log(`strip ${s}: ${buf.byteLength} bytes`);
+      const img  = decodeStrip(buf, 320, 160);
+      const ctx  = document.getElementById(`c${s}`).getContext('2d');
+      ctx.putImageData(img, 0, 0);
+    } catch(e) {
+      status(`strip ${s} error: ${e}`);
+    }
+  }
+  status('Done.');
+}
+
+async function fetchBmp() {
+  const server = document.getElementById('server').value.replace(/\/$/, '');
+  const player = document.getElementById('player').value;
+  const face   = document.getElementById('face').value;
+  const url    = `${server}/bmp/${player}/${face}`;
+  status(`Fetching BMP…`);
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) { status(`BMP: HTTP ${resp.status}`); return; }
+    const blob = await resp.blob();
+    const burl = URL.createObjectURL(blob);
+    const img  = new Image();
+    img.onload = () => {
+      const c   = document.getElementById('cbmp');
+      c.style.display = 'block';
+      c.getContext('2d').drawImage(img, 0, 0, 320, 480);
+      status('BMP loaded — compare with strips above.');
+      URL.revokeObjectURL(burl);
+    };
+    img.src = burl;
+  } catch(e) {
+    status(`BMP error: ${e}`);
+  }
+}
+
+// Auto-fetch on load
+fetchStrips();
+</script>
+</body>
+</html>

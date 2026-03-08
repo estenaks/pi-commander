@@ -6,6 +6,7 @@ pico/Pico-Eval-Board-Code
 
 # Python virtual environment
 webserver/.venv/
+pico/.venv/
 
 # Python caches
 __pycache__/
