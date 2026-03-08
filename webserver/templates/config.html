@@ -666,31 +666,41 @@
 			doSearch(DEFAULT_QUERY);
 
 			// ── Hamburger nav ──────────────────────────────────────────────────────
-(function () {
-    const toggle  = document.getElementById("nav-toggle");
-    const drawer  = document.getElementById("nav-drawer");
-    const overlay = document.getElementById("nav-overlay");
+			(function () {
+				const toggle = document.getElementById("nav-toggle");
+				const drawer = document.getElementById("nav-drawer");
+				const overlay = document.getElementById("nav-overlay");
 
-    function open()  { drawer.classList.add("open");  overlay.classList.add("open");  }
-    function close() { drawer.classList.remove("open"); overlay.classList.remove("open"); }
+				function open() {
+					drawer.classList.add("open");
+					overlay.classList.add("open");
+				}
+				function close() {
+					drawer.classList.remove("open");
+					overlay.classList.remove("open");
+				}
 
-    toggle.addEventListener("click", () =>
-        drawer.classList.contains("open") ? close() : open()
-    );
-    overlay.addEventListener("click", close);
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
-})();
+				toggle.addEventListener("click", () =>
+					drawer.classList.contains("open") ? close() : open(),
+				);
+				overlay.addEventListener("click", close);
+				document.addEventListener("keydown", (e) => {
+					if (e.key === "Escape") close();
+				});
+			})();
 
-async function navPost(url, body) {
-    if (!confirm(`POST ${url}?`)) return;
-    const r = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body || {}),
-    });
-    const data = await r.json().catch(() => ({}));
-    alert(`${r.status} ${r.statusText}\n\n${JSON.stringify(data, null, 2)}`);
-}
+			async function navPost(url, body) {
+				if (!confirm(`POST ${url}?`)) return;
+				const r = await fetch(url, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(body || {}),
+				});
+				const data = await r.json().catch(() => ({}));
+				alert(
+					`${r.status} ${r.statusText}\n\n${JSON.stringify(data, null, 2)}`,
+				);
+			}
 		</script>
 	</body>
 </html>
