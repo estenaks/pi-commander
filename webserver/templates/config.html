@@ -165,9 +165,208 @@
 				opacity: 0.35;
 				cursor: not-allowed;
 			}
+			/* ── Hamburger nav ─────────────────────────────────────────────── */
+			#nav-toggle {
+				position: fixed;
+				top: 14px;
+				right: 14px;
+				z-index: 1000;
+				background: var(--btn-bg);
+				border: 1px solid var(--border);
+				border-radius: 10px;
+				padding: 8px 11px;
+				cursor: pointer;
+				font-size: 20px;
+				line-height: 1;
+				color: var(--text);
+			}
+			#nav-toggle:hover {
+				background: var(--btn-bg-hover);
+			}
+
+			#nav-drawer {
+				display: none;
+				position: fixed;
+				top: 0;
+				right: 0;
+				width: min(320px, 90vw);
+				height: 100vh;
+				background: var(--panel);
+				border-left: 1px solid var(--border);
+				box-shadow: -6px 0 24px var(--shadow);
+				z-index: 999;
+				overflow-y: auto;
+				padding: 56px 0 24px;
+				box-sizing: border-box;
+			}
+			#nav-drawer.open {
+				display: block;
+			}
+
+			#nav-overlay {
+				display: none;
+				position: fixed;
+				inset: 0;
+				z-index: 998;
+				background: rgba(0, 0, 0, 0.45);
+			}
+			#nav-overlay.open {
+				display: block;
+			}
+
+			.nav-section {
+				padding: 6px 20px 2px;
+				font-size: 11px;
+				font-weight: 600;
+				letter-spacing: 0.08em;
+				text-transform: uppercase;
+				color: var(--muted);
+				margin-top: 10px;
+			}
+			.nav-section:first-child {
+				margin-top: 0;
+			}
+
+			#nav-drawer a,
+			#nav-drawer button.nav-btn {
+				display: block;
+				width: 100%;
+				padding: 9px 20px;
+				text-decoration: none;
+				color: var(--text);
+				font-size: 14px;
+				background: none;
+				border: none;
+				text-align: left;
+				cursor: pointer;
+				box-sizing: border-box;
+			}
+			#nav-drawer a:hover,
+			#nav-drawer button.nav-btn:hover {
+				background: var(--btn-bg-hover);
+			}
+
+			.nav-method {
+				display: inline-block;
+				font-size: 10px;
+				font-weight: 700;
+				letter-spacing: 0.04em;
+				padding: 1px 5px;
+				border-radius: 4px;
+				margin-right: 6px;
+				vertical-align: middle;
+			}
+			.nav-get {
+				background: rgba(100, 200, 100, 0.18);
+				color: #7ecf7e;
+			}
+			.nav-post {
+				background: rgba(255, 160, 60, 0.18);
+				color: #ffb060;
+			}
+
+			.nav-divider {
+				border: none;
+				border-top: 1px solid var(--border);
+				margin: 8px 12px;
+			}
 		</style>
 	</head>
 	<body>
+		<!-- Hamburger button -->
+		<button id="nav-toggle" aria-label="Open nav">&#9776;</button>
+
+		<!-- Click-outside overlay -->
+		<div id="nav-overlay"></div>
+
+		<!-- Drawer -->
+		<nav id="nav-drawer" aria-label="Site navigation">
+			<div class="nav-section">Pages</div>
+			<a href="/">Home</a>
+			<a href="/config">Config</a>
+			<a href="/booster">Booster simulator</a>
+			<a href="/face">Player 1 face</a>
+			<a href="/player2">Player 2 face</a>
+			<a href="/player3">Player 3 face</a>
+			<a href="/player4">Player 4 face</a>
+			<a href="/cardback.jpg" target="_blank">Card back (JPG)</a>
+
+			<hr class="nav-divider" />
+
+			<div class="nav-section">BMP images</div>
+			<a href="/bmp/all" target="_blank"
+				><span class="nav-method nav-get">GET</span>/bmp/all</a
+			>
+			<a href="/bmp/1/front" target="_blank"
+				><span class="nav-method nav-get">GET</span>/bmp/1/front</a
+			>
+			<a href="/bmp/1/back" target="_blank"
+				><span class="nav-method nav-get">GET</span>/bmp/1/back</a
+			>
+			<a href="/bmp/2/front" target="_blank"
+				><span class="nav-method nav-get">GET</span>/bmp/2/front</a
+			>
+			<a href="/bmp/2/back" target="_blank"
+				><span class="nav-method nav-get">GET</span>/bmp/2/back</a
+			>
+			<a href="/bmp/3/front" target="_blank"
+				><span class="nav-method nav-get">GET</span>/bmp/3/front</a
+			>
+			<a href="/bmp/3/back" target="_blank"
+				><span class="nav-method nav-get">GET</span>/bmp/3/back</a
+			>
+			<a href="/bmp/4/front" target="_blank"
+				><span class="nav-method nav-get">GET</span>/bmp/4/front</a
+			>
+			<a href="/bmp/4/back" target="_blank"
+				><span class="nav-method nav-get">GET</span>/bmp/4/back</a
+			>
+
+			<hr class="nav-divider" />
+
+			<div class="nav-section">API — GET</div>
+			<a href="/api/current/1" target="_blank"
+				><span class="nav-method nav-get">GET</span>/api/current/1</a
+			>
+			<a href="/api/current/2" target="_blank"
+				><span class="nav-method nav-get">GET</span>/api/current/2</a
+			>
+			<a href="/api/current/3" target="_blank"
+				><span class="nav-method nav-get">GET</span>/api/current/3</a
+			>
+			<a href="/api/current/4" target="_blank"
+				><span class="nav-method nav-get">GET</span>/api/current/4</a
+			>
+			<a href="/api/config-url" target="_blank"
+				><span class="nav-method nav-get">GET</span>/api/config-url</a
+			>
+			<a href="/api/booster/sets" target="_blank"
+				><span class="nav-method nav-get">GET</span>/api/booster/sets</a
+			>
+			<a href="/ota/version" target="_blank"
+				><span class="nav-method nav-get">GET</span>/ota/version</a
+			>
+			<a href="/ota/main.py" target="_blank"
+				><span class="nav-method nav-get">GET</span>/ota/main.py</a
+			>
+
+			<hr class="nav-divider" />
+
+			<div class="nav-section">API — POST (fires immediately)</div>
+			<button
+				class="nav-btn"
+				onclick="navPost('/api/booster/single', { set_code: 'neo' })"
+			>
+				<span class="nav-method nav-post">POST</span>/api/booster/single (neo)
+			</button>
+			<button
+				class="nav-btn"
+				onclick="navPost('/api/shutdown')"
+				style="color: #ff6b6b"
+			>
+				<span class="nav-method nav-post">POST</span>/api/shutdown ⚠
+			</button>
+		</nav>
 		<h1>/config</h1>
 
 		<div class="row">
@@ -465,6 +664,33 @@
 			renderPlayerQr();
 			qEl.value = DEFAULT_QUERY;
 			doSearch(DEFAULT_QUERY);
+
+			// ── Hamburger nav ──────────────────────────────────────────────────────
+(function () {
+    const toggle  = document.getElementById("nav-toggle");
+    const drawer  = document.getElementById("nav-drawer");
+    const overlay = document.getElementById("nav-overlay");
+
+    function open()  { drawer.classList.add("open");  overlay.classList.add("open");  }
+    function close() { drawer.classList.remove("open"); overlay.classList.remove("open"); }
+
+    toggle.addEventListener("click", () =>
+        drawer.classList.contains("open") ? close() : open()
+    );
+    overlay.addEventListener("click", close);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+})();
+
+async function navPost(url, body) {
+    if (!confirm(`POST ${url}?`)) return;
+    const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+    });
+    const data = await r.json().catch(() => ({}));
+    alert(`${r.status} ${r.statusText}\n\n${JSON.stringify(data, null, 2)}`);
+}
 		</script>
 	</body>
 </html>
