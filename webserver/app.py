@@ -501,7 +501,44 @@ def bmp_all():
 # ── OTA routes ───────────────────────────────────────────────────────────────
 
 import subprocess
+import hashlib
 
+# Files in pico/ that should NOT be sent to the device
+_OTA_SKIP = {"secrets.py", "secrets.py.example", "setup.sh", "requirements.txt"}
+
+@app.get("/ota/manifest")
+def ota_manifest():
+    """Return {files: {filename: sha256, ...}} for every deployable pico/ file."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    pico_dir  = os.path.join(repo_root, "pico")
+    files = {}
+    for name in os.listdir(pico_dir):
+        if name in _OTA_SKIP or not name.endswith(".py"):
+            continue
+        path = os.path.join(pico_dir, name)
+        if not os.path.isfile(path):
+            continue
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                h.update(chunk)
+        files[name] = h.hexdigest()
+    return jsonify({"files": files})
+
+
+@app.get("/ota/file/<filename>")
+def ota_file(filename):
+    """Serve a single file from pico/ by name."""
+    if filename in _OTA_SKIP or "/" in filename or "\\" in filename:
+        return jsonify({"error": "not allowed"}), 403
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(repo_root, "pico", filename)
+    if not os.path.isfile(path):
+        return jsonify({"error": "not found"}), 404
+    return send_file(path, mimetype="text/plain")
+
+
+# Keep the old single-file OTA routes for backwards compat (can delete later)
 @app.get("/ota/version")
 def ota_version():
     try:
@@ -517,11 +554,6 @@ def ota_version():
 def ota_main():
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return send_file(os.path.join(repo_root, "pico", "main.py"), mimetype="text/plain")
-
-@app.post("/api/shutdown")
-def api_shutdown():
-    subprocess.Popen(["sudo", "shutdown", "-h", "now"])
-    return jsonify({"ok": True})
 
 # --- QR business
 
