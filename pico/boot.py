@@ -11,7 +11,8 @@ except ImportError:
 
 MANIFEST_URL = SERVER + "/ota/manifest"
 FILE_URL      = SERVER + "/ota/file/"
-SKIP_FILES    = {"secrets.py", "boot.py"}
+SKIP_FILES    = {}
+# SKIP_FILES    = {"secrets.py", "boot.py"}
 
 
 # ---- WiFi ----
@@ -44,7 +45,7 @@ def _sha256(path):
                 if not chunk:
                     break
                 h.update(chunk)
-        return h.hexdigest()
+        return "".join("{:02x}".format(b) for b in h.digest())
     except OSError:
         return None
 
