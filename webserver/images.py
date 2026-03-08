@@ -4,6 +4,7 @@ import sys
 import struct
 import urllib.request
 
+import numpy as np
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
 
@@ -18,13 +19,69 @@ STRIP_H = 160
 DISPLAY_W = 320
 DISPLAY_H = 480
 
+# ---------------------------------------------------------------------------
+# Palette — the 16 named colours from test_display.py, in RGB888.
+# These are the ONLY colours the Pico will ever receive, so we know exactly
+# how each one must be encoded.
+# ---------------------------------------------------------------------------
+_PALETTE_RGB = [
+    (  0,   0,   0),   # BLACK
+    (255, 255, 255),   # WHITE
+    (255,   0,   0),   # RED
+    (  0, 255,   0),   # GREEN
+    (  0,   0, 255),   # BLUE
+    (255, 255,   0),   # YELLOW
+    (  0, 255, 255),   # CYAN
+    (255,   0, 255),   # MAGENTA
+    (255, 165,   0),   # ORANGE
+    (128, 128, 128),   # GREY
+    ( 64,  64,  64),   # DGREY
+    (192, 192, 192),   # LGREY
+    (  0,   0, 128),   # NAVY
+    (  0, 128, 128),   # TEAL
+    (128,   0, 128),   # PURPLE
+    (  0, 128,   0),   # LIME
+]
+
+def _bs(c: int) -> int:
+    """Byte-swap a 16-bit value — matches bs() in test_display.py."""
+    return ((c & 0xFF) << 8) | (c >> 8)
+
+def _rgb565(r: int, g: int, b: int) -> int:
+    """Pack RGB888 → RGB565 word, then byte-swap — matches rgb() in test_display.py."""
+    return _bs(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3))
+
+# Pre-compute the 2-byte little-endian framebuffer word for each palette entry.
+# Index i → bytes to write into lcd.buffer for that colour.
+_PALETTE_WORDS: list[bytes] = []
+for _r, _g, _b in _PALETTE_RGB:
+    _w = _rgb565(_r, _g, _b)
+    _PALETTE_WORDS.append(bytes([_w & 0xFF, (_w >> 8) & 0xFF]))
+
+# Build a PIL palette image (needed for quantize())
+_PIL_PALETTE_IMG = Image.new("P", (1, 1))
+_flat = []
+for _r, _g, _b in _PALETTE_RGB:
+    _flat += [_r, _g, _b]
+# PIL palette must be 768 bytes (256 × 3); pad with zeros
+_flat += [0] * (768 - len(_flat))
+_PIL_PALETTE_IMG.putpalette(_flat)
+
 
 def config_url() -> str:
     """Single source of truth for the /config URL used in all QR codes."""
     return f"http://{LOCAL_IP}{CONFIG_PORT}/config"
 
 
-def _image_to_bmp(data: bytes) -> bytes:
+def _quantize_to_palette(img: Image.Image) -> Image.Image:
+    """Floyd-Steinberg dither img down to _PALETTE_RGB using PIL's quantize()."""
+    img = img.convert("RGB")
+    # quantize() with a palette image uses the supplied palette and dithers with F-S
+    return img.quantize(palette=_PIL_PALETTE_IMG, dither=Image.Dither.FLOYDSTEINBERG)
+
+
+def _fit_image(data: bytes) -> Image.Image:
+    """Open, resize and centre-crop/pad to DISPLAY_W × DISPLAY_H RGB."""
     img = Image.open(io.BytesIO(data))
     orig_w, orig_h = img.size
     new_h = DISPLAY_H
@@ -37,55 +94,45 @@ def _image_to_bmp(data: bytes) -> bytes:
         padded = Image.new("RGB", (DISPLAY_W, DISPLAY_H), (0, 0, 0))
         padded.paste(img, ((DISPLAY_W - new_w) // 2, 0))
         img = padded
-    img = img.convert("RGB")
+    return img.convert("RGB")
+
+
+def _image_to_bmp(data: bytes) -> bytes:
+    img = _fit_image(data)
     buf = io.BytesIO()
     img.save(buf, format="BMP")
     return buf.getvalue()
 
 
 def _image_to_strips(data: bytes) -> list[bytes]:
-    """Convert image bytes to a list of raw RGB565 strips for the ILI9488 in BGR mode.
+    """Dither image to the 16-colour Pico palette, then encode as BGR565 strips.
 
-    Returns a list of 3 strips, each DISPLAY_W * STRIP_H * 2 bytes.
-    Pixels are packed as BGR565 little-endian: B in bits 15-11, G in 10-5, R in 4-0,
-    stored low-byte-first. The display's MADCTL BGR bit swaps R and B in hardware,
-    so sending B in the high bits produces the correct colour on screen.
+    Each strip is DISPLAY_W * STRIP_H * 2 bytes.
+    Every pixel is one of the 16 known-good palette entries, encoded with the
+    exact same bs(rgb(r,g,b)) formula used in test_display.py — so colours are
+    guaranteed to match what the test demo produces.
     """
-    img = Image.open(io.BytesIO(data))
-    orig_w, orig_h = img.size
-    new_h = DISPLAY_H
-    new_w = max(1, round(orig_w * new_h / orig_h))
-    img = img.resize((new_w, new_h), Image.LANCZOS)
-    if new_w > DISPLAY_W:
-        left = (new_w - DISPLAY_W) // 2
-        img = img.crop((left, 0, left + DISPLAY_W, DISPLAY_H))
-    elif new_w < DISPLAY_W:
-        padded = Image.new("RGB", (DISPLAY_W, DISPLAY_H), (0, 0, 0))
-        padded.paste(img, ((DISPLAY_W - new_w) // 2, 0))
-        img = padded
-    img = img.convert("RGB")
+    img = _fit_image(data)
+    quantized = _quantize_to_palette(img)  # palette-indexed, Floyd-Steinberg dithered
+
+    # Convert palette indices to the pre-computed 2-byte framebuffer words using numpy
+    indices = np.frombuffer(quantized.tobytes(), dtype=np.uint8)  # DISPLAY_W * DISPLAY_H values
+
+    # Build lookup: index → [lo, hi]
+    lut = np.zeros((256, 2), dtype=np.uint8)
+    for i, word_bytes in enumerate(_PALETTE_WORDS):
+        lut[i, 0] = word_bytes[0]
+        lut[i, 1] = word_bytes[1]
+
+    # Map every pixel index to its 2-byte word
+    pixels_2b = lut[indices]  # shape: (DISPLAY_W * DISPLAY_H, 2)
 
     strips = []
     num_strips = DISPLAY_H // STRIP_H
+    strip_px = DISPLAY_W * STRIP_H
     for s in range(num_strips):
-        y0 = s * STRIP_H
-        y1 = y0 + STRIP_H
-        strip_img = img.crop((0, y0, DISPLAY_W, y1))
-        pixels = strip_img.tobytes()  # RGB888, row-major
-
-        # BGR565 little-endian: B in high bits to match display's hardware BGR swap
-        out = bytearray(DISPLAY_W * STRIP_H * 2)
-        j = 0
-        for i in range(0, len(pixels), 3):
-            r = pixels[i]
-            g = pixels[i + 1]
-            b = pixels[i + 2]
-            rgb565 = (b >> 3) << 11 | (g >> 2) << 5 | (r >> 3)
-            out[j]     = rgb565 & 0xFF         # low byte first
-            out[j + 1] = (rgb565 >> 8) & 0xFF
-            j += 2
-
-        strips.append(bytes(out))
+        strip_data = pixels_2b[s * strip_px:(s + 1) * strip_px]
+        strips.append(bytes(strip_data.flatten()))
 
     return strips
 
@@ -120,7 +167,7 @@ def _any_to_bmp(url_or_path: str) -> bytes:
 
 
 def _any_to_strips(url_or_path: str) -> list[bytes]:
-    """Convert either a remote URL or local path to BGR565 strips."""
+    """Convert either a remote URL or local path to dithered palette strips."""
     if url_or_path == CARD_BACK_WEB_URL:
         with open(CARD_BACK_PATH, "rb") as f:
             data = f.read()
@@ -180,7 +227,7 @@ def _make_config_prompt_bmp() -> bytes:
 
 
 def _make_config_prompt_strips() -> list[bytes]:
-    """Generate config prompt as BGR565 strips."""
+    """Generate config prompt as dithered palette strips."""
     bmp = _make_config_prompt_bmp()
     return _image_to_strips(bmp)
 
