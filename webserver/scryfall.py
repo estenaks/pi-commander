@@ -32,8 +32,14 @@ _state_by_player = {
     for p in PLAYERS
 }
 
-_bmp_cache: dict[tuple[int, str], bytes] = {}
+_bmp_cache:   dict[tuple[int, str], bytes]       = {}
 _strip_cache: dict[tuple[int, str], list[bytes]] = {}
+
+# One background worker thread per player so rapid card changes for different
+# players don't queue behind each other, but changes for the same player are
+# serialised (the in-flight job checks card_id before writing to cache).
+_render_executors: dict[int, threading.Thread] = {}
+_render_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -150,26 +156,45 @@ def _require_player(player: int) -> int:
 
 
 def _generate_bmps(player: int) -> None:
+    """Blocking render — always called from a background thread."""
     with _state_lock:
         faces_meta = list(_state_by_player[player]["faces_meta"])
-        card_id = _state_by_player[player]["card_id"]
+        card_id    = _state_by_player[player]["card_id"]
 
     if not faces_meta:
         return
 
     front_url = faces_meta[0]["image_url"]
-    back_url = faces_meta[1]["image_url"] if len(faces_meta) > 1 else CARD_BACK_WEB_URL
+    back_url  = faces_meta[1]["image_url"] if len(faces_meta) > 1 else CARD_BACK_WEB_URL
 
     for face, url in (("front", front_url), ("back", back_url)):
         try:
+            print(f"[render] player={player} face={face} — starting dither…")
             bmp_bytes = _any_to_bmp(url)
-            strips = _any_to_strips(url)
+            strips    = _any_to_strips(url)
             with _state_lock:
+                # Only write if the player hasn't moved on to a newer card
                 if _state_by_player[player]["card_id"] == card_id:
-                    _bmp_cache[(player, face)] = bmp_bytes
+                    _bmp_cache[(player, face)]   = bmp_bytes
                     _strip_cache[(player, face)] = strips
+                    print(f"[render] player={player} face={face} — done, cache updated.")
+                else:
+                    print(f"[render] player={player} face={face} — card changed, discarding.")
         except Exception as exc:
-            print(f"[bmp] Error generating {face} BMP for player {player}: {exc}", file=sys.stderr)
+            print(f"[render] Error for player={player} face={face}: {exc}", file=sys.stderr)
+
+
+def _schedule_render(player: int) -> None:
+    """Fire _generate_bmps in a background daemon thread.
+
+    If a render is already running for this player it will naturally discard
+    its result when it finishes (card_id guard above), and the new thread will
+    produce the up-to-date image.
+    """
+    t = threading.Thread(target=_generate_bmps, args=(player,), daemon=True)
+    t.start()
+    with _render_lock:
+        _render_executors[player] = t
 
 
 def _set_player_state(player: int, *, last_query: str, card: dict, premium: str | None = None) -> dict:
@@ -181,21 +206,22 @@ def _set_player_state(player: int, *, last_query: str, card: dict, premium: str 
 
     with _state_lock:
         st = _state_by_player[player]
-        st["last_query"] = last_query
-        st["card_id"] = card.get("id")
-        st["faces_meta"] = faces_meta
+        st["last_query"]    = last_query
+        st["card_id"]       = card.get("id")
+        st["faces_meta"]    = faces_meta
         st["border_crop_url"] = border_crop
-        st["premium"] = premium
+        st["premium"]       = premium
 
         result = {
-            "last_query": st["last_query"],
-            "card_id": st["card_id"],
-            "faces": st["faces_meta"],
+            "last_query":     st["last_query"],
+            "card_id":        st["card_id"],
+            "faces":          st["faces_meta"],
             "border_crop_url": st["border_crop_url"],
-            "premium": st["premium"],
+            "premium":        st["premium"],
         }
 
-    _generate_bmps(player)
+    # Return immediately — dithering happens in the background
+    _schedule_render(player)
     return result
 
 
@@ -246,7 +272,7 @@ def _build_card_record(card: dict, set_code: str) -> dict | None:
         f0 = card["card_faces"][0]
         f1 = card["card_faces"][1]
         front_url = _pick_image_border_crop_only(f0.get("image_uris") or {})
-        back_url = _pick_image_border_crop_only(f1.get("image_uris") or {})
+        back_url  = _pick_image_border_crop_only(f1.get("image_uris") or {})
         if not colors:
             colors = f0.get("colors") or []
     else:
@@ -262,18 +288,18 @@ def _build_card_record(card: dict, set_code: str) -> dict | None:
         cn_int = 0
 
     return {
-        "id":              card.get("id"),
-        "name":            card.get("name", "Unknown"),
-        "image_url":       front_url,
-        "back_image_url":  back_url,
-        "rarity":          rarity,
-        "set":             set_code,
-        "mana_cost":       card.get("mana_cost", ""),
-        "type_line":       type_line,
-        "is_common_land":  (rarity == "common" and "Land" in type_line),
-        "color_bucket":    _classify_color(colors, type_line),
-        "frame":           card.get("frame", ""),
-        "border_color":    card.get("border_color", ""),
+        "id":               card.get("id"),
+        "name":             card.get("name", "Unknown"),
+        "image_url":        front_url,
+        "back_image_url":   back_url,
+        "rarity":           rarity,
+        "set":              set_code,
+        "mana_cost":        card.get("mana_cost", ""),
+        "type_line":        type_line,
+        "is_common_land":   (rarity == "common" and "Land" in type_line),
+        "color_bucket":     _classify_color(colors, type_line),
+        "frame":            card.get("frame", ""),
+        "border_color":     card.get("border_color", ""),
         "collector_number": cn_int,
     }
 
@@ -333,23 +359,6 @@ def _get_full_set_data(set_code: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Mystery Booster 2 – virtual pools
 # ---------------------------------------------------------------------------
-#
-# MB2 has three conceptually separate card pools:
-#
-#   mb2_main   – The List reprints printed for MB2 (e:plst date=2024-08-02).
-#                These fill the 10 C/U colour slots, the multi/artifact/land
-#                slot, and the rare/mythic slot.
-#
-#   mb2_frame  – Future Sight frame cards inside the physical MB2 set
-#                (e:mb2 cn<=242).  The cn ranges overlap two sub-pools:
-#                  cn 122-143  non-foil C/U frame cards
-#                  cn 144-242  foil-able frame cards (any rarity)
-#                  cn 243-264  foil-exclusive frame cards (always foil)
-#
-#   mb2_border – White-bordered reprints (e:mb2 cn<=121, border:white).
-#
-#   mb2_test   – Playtest cards (e:mb2 cn>=265).
-#
 
 def _get_mb2_main_pool() -> list[dict]:
     """The List cards printed in MB2 (e:plst date=2024-08-02)."""
@@ -360,10 +369,7 @@ def _get_mb2_main_pool() -> list[dict]:
 
 
 def _get_mb2_physical_pool() -> list[dict]:
-    """All cards physically printed in the MB2 set (e:mb2).
-
-    Used for frame, white-border, and playtest slots.
-    """
+    """All cards physically printed in the MB2 set (e:mb2)."""
     return _fetch_all_pages(
         scryfall_query="e:mb2",
         cache_key="mb2_physical_pool",

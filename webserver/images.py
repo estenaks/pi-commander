@@ -59,24 +59,23 @@ _PALETTE_LUT = np.array([[w[0], w[1]] for w in _PALETTE_WORDS], dtype=np.uint8)
 
 
 # ---------------------------------------------------------------------------
-# Dithering — precise Floyd-Steinberg, ported from epd_commander.py
-# Full 4-neighbour error diffusion: 7/16 right, 3/16 below-left,
-# 5/16 below, 1/16 below-right. Pixel-by-pixel for maximum quality.
-# Returns palette indices array of shape (DISPLAY_H, DISPLAY_W), dtype uint8.
+# Dithering — precise Floyd-Steinberg, pixel-by-pixel, 4-neighbour.
+# Direct port of floyd_steinberg_precise() from epd_commander.py.
+# Returns palette indices (H, W) uint8 instead of a PIL image.
 # ---------------------------------------------------------------------------
 
 def _floyd_steinberg_precise(img: Image.Image) -> np.ndarray:
-    arr     = np.array(img.convert("RGB"), dtype=np.int32)  # (H, W, 3)
+    arr     = np.array(img.convert("RGB"), dtype=np.int32)
     h, w    = arr.shape[:2]
     indices = np.zeros((h, w), dtype=np.uint8)
 
     for y in range(h):
         for x in range(w):
             old  = arr[y, x].copy()
-            diff = _PALETTE_NP - old                        # (16, 3)
+            diff = _PALETTE_NP - old
             idx  = (diff ** 2).sum(axis=1).argmin()
             new  = _PALETTE_NP[idx]
-            arr[y, x]  = new
+            arr[y, x]     = new
             indices[y, x] = idx
             err = old - new
             if x + 1 < w:
@@ -90,6 +89,16 @@ def _floyd_steinberg_precise(img: Image.Image) -> np.ndarray:
         arr[y] = np.clip(arr[y], 0, 255)
 
     return indices
+
+
+def _indices_to_strips(indices: np.ndarray) -> list[bytes]:
+    """Convert a (DISPLAY_H, DISPLAY_W) palette indices array to encoded strips."""
+    pixels_2b = _PALETTE_LUT[indices]
+    strips = []
+    for s in range(DISPLAY_H // STRIP_H):
+        strip = pixels_2b[s * STRIP_H:(s + 1) * STRIP_H]
+        strips.append(bytes(strip.reshape(-1)))
+    return strips
 
 
 def config_url() -> str:
@@ -122,28 +131,12 @@ def _image_to_bmp(data: bytes) -> bytes:
 
 
 def _image_to_strips(data: bytes) -> list[bytes]:
-    """Precise Floyd-Steinberg dither to the 16-colour Pico palette, encode as strips.
-
-    Each strip is DISPLAY_W * STRIP_H * 2 bytes.
-    Every pixel is one of the 16 known-good palette entries, encoded with
-    bs(rgb(r,g,b)) — identical to test_display.py.
-    """
-    img     = _fit_image(data)
-    indices = _floyd_steinberg_precise(img)     # (DISPLAY_H, DISPLAY_W), uint8
-
-    # Map palette indices → 2-byte framebuffer words via LUT: (H, W, 2)
-    pixels_2b = _PALETTE_LUT[indices]
-
-    strips = []
-    for s in range(DISPLAY_H // STRIP_H):
-        strip = pixels_2b[s * STRIP_H:(s + 1) * STRIP_H]  # (STRIP_H, W, 2)
-        strips.append(bytes(strip.reshape(-1)))
-
-    return strips
+    """Precise Floyd-Steinberg dither to 16-colour Pico palette, encode as strips."""
+    img = _fit_image(data)
+    return _indices_to_strips(_floyd_steinberg_precise(img))
 
 
 def _url_to_bmp(url: str) -> bytes:
-    """Fetch a remote image and convert to BMP."""
     req = urllib.request.Request(
         url,
         headers={
@@ -157,13 +150,11 @@ def _url_to_bmp(url: str) -> bytes:
 
 
 def _file_to_bmp(path: str) -> bytes:
-    """Read a local image file and convert to BMP."""
     with open(path, "rb") as f:
         return _image_to_bmp(f.read())
 
 
 def _any_to_bmp(url_or_path: str) -> bytes:
-    """Convert either a remote URL or the local card-back sentinel to BMP."""
     if url_or_path == CARD_BACK_WEB_URL:
         return _file_to_bmp(CARD_BACK_PATH)
     if url_or_path.startswith("http://") or url_or_path.startswith("https://"):
@@ -172,7 +163,6 @@ def _any_to_bmp(url_or_path: str) -> bytes:
 
 
 def _any_to_strips(url_or_path: str) -> list[bytes]:
-    """Convert either a remote URL or local path to dithered palette strips."""
     if url_or_path == CARD_BACK_WEB_URL:
         with open(CARD_BACK_PATH, "rb") as f:
             data = f.read()
@@ -189,9 +179,8 @@ def _any_to_strips(url_or_path: str) -> list[bytes]:
     return _image_to_strips(data)
 
 
-def _make_config_prompt_bmp() -> bytes:
-    """Generate a 320x480 placeholder BMP with a QR code and text
-    telling the user to visit /config."""
+def _make_config_prompt_image() -> Image.Image:
+    """Generate a 320×480 config prompt, correctly oriented for the Pico display."""
     url = config_url()
 
     qr = qrcode.QRCode(border=2)
@@ -225,6 +214,12 @@ def _make_config_prompt_bmp() -> bytes:
             draw.text(((DISPLAY_W - text_w) // 2, y), line, fill=(255, 255, 255), font=font)
         y += 28
 
+    return img  # 320×480, no rotation — correct for Pico strips
+
+
+def _make_config_prompt_bmp() -> bytes:
+    """BMP path rotates 90° for the legacy BMP pipeline."""
+    img = _make_config_prompt_image()
     img = img.rotate(90, expand=True)
     buf = io.BytesIO()
     img.save(buf, format="BMP")
@@ -232,13 +227,12 @@ def _make_config_prompt_bmp() -> bytes:
 
 
 def _make_config_prompt_strips() -> list[bytes]:
-    """Generate config prompt as dithered palette strips."""
-    bmp = _make_config_prompt_bmp()
-    return _image_to_strips(bmp)
+    """Generate config prompt as dithered palette strips — no rotation, direct render."""
+    img = _make_config_prompt_image()
+    return _indices_to_strips(_floyd_steinberg_precise(img))
 
 
 def init_fallback_bmps(card_back_path: str) -> tuple[bytes, bytes | None]:
-    """Pre-generate fallback BMPs at startup. Returns (config_prompt_bmp, card_back_bmp)."""
     config_prompt_bmp = _make_config_prompt_bmp()
 
     card_back_bmp = None
@@ -251,7 +245,6 @@ def init_fallback_bmps(card_back_path: str) -> tuple[bytes, bytes | None]:
 
 
 def init_fallback_strips(card_back_path: str) -> tuple[list[bytes], list[bytes] | None]:
-    """Pre-generate fallback strip lists at startup."""
     config_prompt_strips = _make_config_prompt_strips()
 
     card_back_strips = None
