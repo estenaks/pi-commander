@@ -35,9 +35,6 @@ _state_by_player = {
 _bmp_cache:   dict[tuple[int, str], bytes]       = {}
 _strip_cache: dict[tuple[int, str], list[bytes]] = {}
 
-# One background worker thread per player so rapid card changes for different
-# players don't queue behind each other, but changes for the same player are
-# serialised (the in-flight job checks card_id before writing to cache).
 _render_executors: dict[int, threading.Thread] = {}
 _render_lock = threading.Lock()
 
@@ -92,6 +89,7 @@ def _scryfall_get(url: str, use_cache: bool = False, cache_key: str = None, cach
 # ---------------------------------------------------------------------------
 
 def _pick_image_border_crop_only(iu: dict) -> str:
+    """For Pico display: prefers border_crop (480×680)."""
     if not isinstance(iu, dict):
         return ""
     return (
@@ -104,32 +102,52 @@ def _pick_image_border_crop_only(iu: dict) -> str:
     )
 
 
+def _pick_image_normal(iu: dict) -> str:
+    """For e-paper display: prefers normal (488×680) for higher dither quality."""
+    if not isinstance(iu, dict):
+        return ""
+    return (
+        iu.get("normal")
+        or iu.get("large")
+        or iu.get("border_crop")
+        or iu.get("png")
+        or iu.get("art_crop")
+        or ""
+    )
+
+
 def _extract_faces_meta_always_two(card: dict) -> list[dict]:
     faces = card.get("card_faces") or []
     if isinstance(faces, list) and len(faces) >= 2:
         f0 = faces[0] or {}
         f1 = faces[1] or {}
-        u0 = _pick_image_border_crop_only((f0.get("image_uris") or {}))
-        u1 = _pick_image_border_crop_only((f1.get("image_uris") or {}))
+        iu0 = f0.get("image_uris") or {}
+        iu1 = f1.get("image_uris") or {}
+        u0  = _pick_image_border_crop_only(iu0)
+        u1  = _pick_image_border_crop_only(iu1)
+        n0  = _pick_image_normal(iu0)
+        n1  = _pick_image_normal(iu1)
         tl0 = f0.get("type_line") if isinstance(f0.get("type_line"), str) else ""
         tl1 = f1.get("type_line") if isinstance(f1.get("type_line"), str) else ""
         if u0:
             if not u1:
                 u1 = u0
+                n1 = n0
             return [
-                {"image_url": u0, "type_line": tl0},
-                {"image_url": u1, "type_line": tl1},
+                {"image_url": u0, "normal_image_url": n0, "type_line": tl0},
+                {"image_url": u1, "normal_image_url": n1, "type_line": tl1},
             ]
 
-    iu = card.get("image_uris") or {}
+    iu    = card.get("image_uris") or {}
     front = _pick_image_border_crop_only(iu)
     if not front:
         return []
 
+    normal = _pick_image_normal(iu)
     tl = card.get("type_line") if isinstance(card.get("type_line"), str) else ""
     return [
-        {"image_url": front, "type_line": tl},
-        {"image_url": CARD_BACK_WEB_URL, "type_line": "Card Back"},
+        {"image_url": front, "normal_image_url": normal, "type_line": tl},
+        {"image_url": CARD_BACK_WEB_URL, "normal_image_url": CARD_BACK_WEB_URL, "type_line": "Card Back"},
     ]
 
 
@@ -173,7 +191,6 @@ def _generate_bmps(player: int) -> None:
             bmp_bytes = _any_to_bmp(url)
             strips    = _any_to_strips(url)
             with _state_lock:
-                # Only write if the player hasn't moved on to a newer card
                 if _state_by_player[player]["card_id"] == card_id:
                     _bmp_cache[(player, face)]   = bmp_bytes
                     _strip_cache[(player, face)] = strips
@@ -185,12 +202,7 @@ def _generate_bmps(player: int) -> None:
 
 
 def _schedule_render(player: int) -> None:
-    """Fire _generate_bmps in a background daemon thread.
-
-    If a render is already running for this player it will naturally discard
-    its result when it finishes (card_id guard above), and the new thread will
-    produce the up-to-date image.
-    """
+    """Fire _generate_bmps in a background daemon thread."""
     t = threading.Thread(target=_generate_bmps, args=(player,), daemon=True)
     t.start()
     with _render_lock:
@@ -206,21 +218,20 @@ def _set_player_state(player: int, *, last_query: str, card: dict, premium: str 
 
     with _state_lock:
         st = _state_by_player[player]
-        st["last_query"]    = last_query
-        st["card_id"]       = card.get("id")
-        st["faces_meta"]    = faces_meta
+        st["last_query"]      = last_query
+        st["card_id"]         = card.get("id")
+        st["faces_meta"]      = faces_meta
         st["border_crop_url"] = border_crop
-        st["premium"]       = premium
+        st["premium"]         = premium
 
         result = {
-            "last_query":     st["last_query"],
-            "card_id":        st["card_id"],
-            "faces":          st["faces_meta"],
+            "last_query":      st["last_query"],
+            "card_id":         st["card_id"],
+            "faces":           st["faces_meta"],
             "border_crop_url": st["border_crop_url"],
-            "premium":        st["premium"],
+            "premium":         st["premium"],
         }
 
-    # Return immediately — dithering happens in the background
     _schedule_render(player)
     return result
 
@@ -251,14 +262,8 @@ def _classify_color(colors: list[str], type_line: str) -> str:
 
 
 def _build_card_record(card: dict, set_code: str) -> dict | None:
-    """Convert a raw Scryfall card object into our cached dict format.
-
-    Returns None if the card has no usable image, or if it is an
-    Arena Alchemy / Rebalanced card (is:alchemy / is:rebalanced).
-    """
+    """Convert a raw Scryfall card object into our cached dict format."""
     rarity = card.get("rarity", "")
-    # "special" is used by Scryfall for Time Spiral Timeshifted cards (tsb).
-    # Allow it through so bonus-sheet pools are not empty.
     if rarity not in ["common", "uncommon", "rare", "mythic", "special"]:
         return None
 
@@ -267,7 +272,7 @@ def _build_card_record(card: dict, set_code: str) -> dict | None:
 
     if card.get("image_uris"):
         front_url = _pick_image_border_crop_only(card["image_uris"])
-        back_url = None
+        back_url  = None
     elif card.get("card_faces") and len(card["card_faces"]) >= 2:
         f0 = card["card_faces"][0]
         f1 = card["card_faces"][1]
@@ -303,11 +308,9 @@ def _build_card_record(card: dict, set_code: str) -> dict | None:
         "collector_number": cn_int,
     }
 
-def _fetch_all_pages(scryfall_query: str, cache_key: str) -> list[dict]:
-    """Download every page of a Scryfall search query and cache the result.
 
-    *scryfall_query* is the raw q= value (will be URL-encoded here).
-    """
+def _fetch_all_pages(scryfall_query: str, cache_key: str) -> list[dict]:
+    """Download every page of a Scryfall search query and cache the result."""
     with _cache_lock:
         cached = _get_cached_data(cache_key, cache_hours=24 * CACHE_EXPIRY_DAYS)
         if cached is not None:
@@ -349,19 +352,13 @@ def _fetch_all_pages(scryfall_query: str, cache_key: str) -> list[dict]:
 
 
 def _get_full_set_data(set_code: str) -> list[dict]:
-    """Fetch every card in a regular Scryfall set."""
     return _fetch_all_pages(
         scryfall_query=f"set:{set_code}",
         cache_key=f"set_{set_code}_full",
     )
 
 
-# ---------------------------------------------------------------------------
-# Mystery Booster 2 – virtual pools
-# ---------------------------------------------------------------------------
-
 def _get_mb2_main_pool() -> list[dict]:
-    """The List cards printed in MB2 (e:plst date=2024-08-02)."""
     return _fetch_all_pages(
         scryfall_query="e:plst date=2024-08-02",
         cache_key="mb2_main_pool",
@@ -369,23 +366,17 @@ def _get_mb2_main_pool() -> list[dict]:
 
 
 def _get_mb2_physical_pool() -> list[dict]:
-    """All cards physically printed in the MB2 set (e:mb2)."""
     return _fetch_all_pages(
         scryfall_query="e:mb2",
         cache_key="mb2_physical_pool",
     )
 
 
-# ---------------------------------------------------------------------------
-# Filtering helpers
-# ---------------------------------------------------------------------------
-
 def _get_cards_by_rarity_from_set(pool: list[dict], rarity: str) -> list[dict]:
     return [c for c in pool if c.get("rarity") == rarity]
 
 
 def _get_cu_from_pool(pool: list[dict]) -> list[dict]:
-    """Commons and uncommons combined."""
     return [c for c in pool if c.get("rarity") in ("common", "uncommon")]
 
 
@@ -395,7 +386,6 @@ def _get_cards_by_color_from_set(pool: list[dict], color_bucket: str) -> list[di
 
 
 def _get_cards_by_cn_range(pool: list[dict], cn_min: int, cn_max: int) -> list[dict]:
-    """Filter by collector number (integer range, inclusive)."""
     return [c for c in pool if cn_min <= c.get("collector_number", 0) <= cn_max]
 
 
@@ -417,7 +407,6 @@ def _has_mythic_rares(pool: list[dict]) -> bool:
 
 
 def _get_rare_or_mythic_card_from_set(pool: list[dict], exclude_ids: set = None) -> dict | None:
-    """Rare with 1-in-8 chance of mythic."""
     if exclude_ids is None:
         exclude_ids = set()
 
