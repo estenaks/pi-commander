@@ -569,10 +569,6 @@ from images import _any_to_strips, init_fallback_strips
 # in startup, alongside the existing BMP fallbacks:
 _CONFIG_PROMPT_STRIPS, _CARD_BACK_STRIPS = init_fallback_strips(CARD_BACK_PATH)
 
-# pre-converted strip cache alongside _bmp_cache
-_strip_cache: dict[tuple[int, str], list[bytes]] = {}
-
-
 def _get_strips_for_player(player: int, face: str) -> list[bytes]:
     with _state_lock:
         strips = _strip_cache.get((player, face))
