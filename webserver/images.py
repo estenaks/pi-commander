@@ -80,8 +80,7 @@ def _image_to_strips(data: bytes) -> list[bytes]:
             r = pixels[i]
             g = pixels[i + 1]
             b = pixels[i + 2]
-            rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
-            # byte-swap so Pico framebuf little-endian matches display
+            rgb565 = ((b & 0xF8) << 8) | ((g & 0xFC) << 3) | (r >> 3)            # byte-swap so Pico framebuf little-endian matches display
             out[j]     = rgb565 & 0xFF
             out[j + 1] = (rgb565 >> 8) & 0xFF
             j += 2
