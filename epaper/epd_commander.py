@@ -140,7 +140,6 @@ def make_qr_splash(config_url: str) -> Image.Image:
     img  = Image.new("RGB", (EPD_W, EPD_H), (0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    # QR code
     qr = qrcode.QRCode(border=2)
     qr.add_data(config_url)
     qr.make(fit=True)
@@ -151,7 +150,6 @@ def make_qr_splash(config_url: str) -> Image.Image:
     qr_y    = (EPD_H - qr_size) // 2 - 20
     img.paste(qr_img, (qr_x, qr_y))
 
-    # Text
     font_large = ImageFont.load_default(size=20)
     font_small = ImageFont.load_default(size=15)
 
@@ -209,7 +207,7 @@ def main():
 
     current_card_id = None
     current_premium = None
-    showing_qr      = False   # track whether the QR splash is on screen
+    showing_qr      = False
 
     while True:
         if _shutdown:
@@ -222,10 +220,17 @@ def main():
             card_id   = data.get("card_id")
             premium   = data.get("premium")
             faces     = data.get("faces", [])
-            image_url = faces[0].get("image_url") if faces else None
+
+            # Prefer normal (488×680) over border_crop for better dither quality.
+            # Fall back to image_url if normal_image_url is absent or empty.
+            image_url = None
+            if faces:
+                image_url = (
+                    faces[0].get("normal_image_url")
+                    or faces[0].get("image_url")
+                )
 
             if not card_id or not image_url:
-                # No card set — show QR splash if not already showing
                 if not showing_qr:
                     log.info("No card set — showing QR splash.")
                     try:
@@ -243,6 +248,7 @@ def main():
             elif card_id != current_card_id or premium != current_premium:
                 log.info(f"Card or premium changed → {card_id}  premium={premium}")
                 is_foil = premium == "foil"
+                log.info(f"Fetching normal image: {image_url}")
                 log.info(f"Rendering: {'precise (foil)' if is_foil else 'fast'}")
                 img_bytes = fetch_bytes(image_url)
                 img       = prepare_image(img_bytes, precise=is_foil)
