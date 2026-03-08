@@ -13,7 +13,7 @@ class LCD_3inch5(framebuf.FrameBuffer):
         self.spi = SPI(1, 60_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
         self.width  = 320
         self.height = 160
-        self.buffer = bytearray(self.width * self.height * 2)
+        self.buffer = bytearray(self.width * self.height * 3)  # 3 bytes/pixel RGB888
         super().__init__(self.buffer, self.width, self.height, framebuf.RGB565)
         self._buf1 = bytearray(1)
         self._init()

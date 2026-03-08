@@ -73,19 +73,16 @@ def _image_to_strips(data: bytes) -> list[bytes]:
         strip_img = img.crop((0, y0, DISPLAY_W, y1))
         pixels = strip_img.tobytes()   # RGB888, row-major
 
-        # Convert RGB888 → RGB565 byte-swapped
-        out = bytearray(DISPLAY_W * STRIP_H * 2)
-        j = 0
-        for i in range(0, len(pixels), 3):
-            r = pixels[i]
-            g = pixels[i + 1]
-            b = pixels[i + 2]
-            rgb565 = ((b & 0xF8) << 8) | ((g & 0xFC) << 3) | (r >> 3)            # byte-swap so Pico framebuf little-endian matches display
-            out[j]     = rgb565 & 0xFF
-            out[j + 1] = (rgb565 >> 8) & 0xFF
-            j += 2
+# AFTER — RGB888, 3 bytes/pixel, straight R G B order for ILI9488 SPI
+        # out = bytearray(DISPLAY_W * STRIP_H * 3)
+        # j = 0
+        # for i in range(0, len(pixels), 3):
+        #     out[j]     = pixels[i]       # R
+        #     out[j + 1] = pixels[i + 1]  # G
+        #     out[j + 2] = pixels[i + 2]  # B
+        #     j += 3
 
-        strips.append(bytes(out))
+        strips.append(bytes(pixels))  # already RGB888, no conversion needed
 
     return strips
 
