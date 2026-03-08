@@ -38,7 +38,6 @@ def _image_to_bmp(data: bytes) -> bytes:
         padded.paste(img, ((DISPLAY_W - new_w) // 2, 0))
         img = padded
     img = img.convert("RGB")
-    # img = img.rotate(90, expand=True)
     buf = io.BytesIO()
     img.save(buf, format="BMP")
     return buf.getvalue()
@@ -48,7 +47,8 @@ def _image_to_strips(data: bytes) -> list[bytes]:
     """Convert image bytes to a list of raw RGB565 strips (byte-swapped for display).
 
     Returns a list of 3 strips, each DISPLAY_W * STRIP_H * 2 bytes.
-    Pixels are in RGB565 little-endian (byte-swapped) matching our bs() helper on the Pico.
+    Pixels are in RGB565 little-endian (byte-swapped) matching bs(rgb(r,g,b))
+    from test_display.py: standard RGB565 word stored low-byte-first.
     """
     img = Image.open(io.BytesIO(data))
     orig_w, orig_h = img.size
@@ -63,7 +63,6 @@ def _image_to_strips(data: bytes) -> list[bytes]:
         padded.paste(img, ((DISPLAY_W - new_w) // 2, 0))
         img = padded
     img = img.convert("RGB")
-    # img = img.rotate(90, expand=True)   # now 320 wide, 480 tall
 
     strips = []
     num_strips = DISPLAY_H // STRIP_H
@@ -71,18 +70,21 @@ def _image_to_strips(data: bytes) -> list[bytes]:
         y0 = s * STRIP_H
         y1 = y0 + STRIP_H
         strip_img = img.crop((0, y0, DISPLAY_W, y1))
-        pixels = strip_img.tobytes()   # RGB888, row-major
+        pixels = strip_img.tobytes()  # RGB888, row-major
 
-# AFTER — RGB888, 3 bytes/pixel, straight R G B order for ILI9488 SPI
-        # out = bytearray(DISPLAY_W * STRIP_H * 3)
-        # j = 0
-        # for i in range(0, len(pixels), 3):
-        #     out[j]     = pixels[i]       # R
-        #     out[j + 1] = pixels[i + 1]  # G
-        #     out[j + 2] = pixels[i + 2]  # B
-        #     j += 3
+        # Convert RGB888 -> RGB565 byte-swapped (matches test_display.py bs(rgb(r,g,b)))
+        out = bytearray(DISPLAY_W * STRIP_H * 2)
+        j = 0
+        for i in range(0, len(pixels), 3):
+            r = pixels[i]
+            g = pixels[i + 1]
+            b = pixels[i + 2]
+            rgb565 = (r >> 3) << 11 | (g >> 2) << 5 | (b >> 3)
+            out[j]     = rgb565 & 0xFF         # low byte first (byte-swap)
+            out[j + 1] = (rgb565 >> 8) & 0xFF
+            j += 2
 
-        strips.append(bytes(pixels))  # already RGB888, no conversion needed
+        strips.append(bytes(out))
 
     return strips
 
@@ -135,7 +137,7 @@ def _any_to_strips(url_or_path: str) -> list[bytes]:
 
 
 def _make_config_prompt_bmp() -> bytes:
-    """Generate a 320×480 placeholder BMP with a QR code and text
+    """Generate a 320x480 placeholder BMP with a QR code and text
     telling the user to visit /config."""
     url = config_url()
 
