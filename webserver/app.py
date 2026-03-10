@@ -433,25 +433,31 @@ def api_random_player(player: int):
     identity_match = (payload.get("identity_match") or "exact").strip().lower()
     mode    = (payload.get("mode") or "commander").strip().lower()
 
-    allowed = {"w", "u", "b", "r", "g"}
-    colors = [c.lower() for c in colors if isinstance(c, str) and c.lower() in allowed]
+    allowed = {"W", "U", "B", "R", "G"}
+    colors = [c.upper() for c in colors if isinstance(c, str) and c.upper() in allowed]
 
     try:
-        q_parts = []
+        # mode q
         if mode == "commander":
-            q_parts.append("is:commander")
+            mode_q = "is:commander"
         else:
-            q_parts.append("t:legendary t:creature")
+            mode_q = "t:legendary t:creature"
 
+        q_parts = []
         if colors:
             colors_str = "".join(colors)
-            q_parts.append(f"id={'=' if identity_match == 'exact' else '>='}{colors_str}")
+            op = "=" if identity_match == "exact" else ">="
+            q_parts.append(f"id{op}{colors_str}")
 
-        q = " ".join(q_parts)
-        url = "https://api.scryfall.com/cards/random?" + urllib.parse.urlencode({"q": q})
+        q_parts.append(mode_q)
+
+        # quote each q value but preserve '=' and ':' characters so they appear as in your working URL
+        params = "+".join(urllib.parse.quote(p, safe="=:") for p in q_parts)
+        url = "https://api.scryfall.com/cards/random?q=" + params
+
         card = _scryfall_get(url)
-        data = _set_player_state(player, last_query=q, card=card)
-        return jsonify({"ok": True, "mode": "random", "player": player, "query": q, "name": card.get("name"), **data})
+        data = _set_player_state(player, last_query=url, card=card)
+        return jsonify({"ok": True, "mode": "random", "player": player, "query": url, "name": card.get("name"), **data})
     except Exception as e:
         return jsonify({"error": str(e)}), 502
 
