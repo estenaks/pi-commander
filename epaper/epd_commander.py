@@ -162,7 +162,29 @@ def prepare_image(raw_bytes: bytes, precise: bool = False) -> Image.Image:
             img = Image.fromarray(arr.astype(np.uint8), "RGB")
     except Exception as e:
         log.warning(f"Border-black adjustment failed: {e}")
-    # ---------------------------------------------------------------------
+    # Blue:
+    if not APPLY_BLUE_AMPLIFY_ONLY_FAST or (APPLY_BLUE_AMPLIFY_ONLY_FAST and not precise):
+        try:
+            arr = np.array(img, dtype=np.int32)  # H x W x 3
+            diff = arr - TARGET_PALE_BLUE_RGB[np.newaxis, np.newaxis, :]
+            dist = np.sqrt((diff ** 2).sum(axis=2))
+            mask = dist <= BLUE_DISTANCE_THRESHOLD
+
+            n_pixels = int(mask.sum())
+            if n_pixels > 0:
+                log.info(f"Amplifying blue for {n_pixels} pixels near {TARGET_PALE_BLUE_RGB.tolist()} (thr={BLUE_DISTANCE_THRESHOLD})")
+                # Work in float for scaling, then clip and convert back
+                matched = arr[mask].astype(np.float32)
+                matched[:, 0] = matched[:, 0] * BLUE_RED_SCALE
+                matched[:, 1] = matched[:, 1] * BLUE_GREEN_SCALE
+                matched[:, 2] = matched[:, 2] * BLUE_BLUE_SCALE
+                matched = np.clip(matched, 0, 255).astype(np.int32)
+                arr[mask] = matched
+                img = Image.fromarray(arr.astype(np.uint8), "RGB")
+            else:
+                log.debug("No pixels matched pale-blue amplification mask.")
+        except Exception as e:
+            log.warning(f"Pale-blue amplification failed: {e}")
 
     # QUICK CONTRAST ADJUSTMENT FOR FAST PATH (optional)
     if not precise:
