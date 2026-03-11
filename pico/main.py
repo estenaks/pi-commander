@@ -115,9 +115,7 @@ LED_PIN = 25              # Pico on-board LED is usually GPIO25
 current_player = 1
 _busy = False  # prevent re-entrancy
 
-# LED pin init
-led = Pin(LED_PIN, Pin.OUT)
-led.value(0)
+counter = 0
 
 def _on_button_pressed():
     """
@@ -149,7 +147,7 @@ def _on_button_pressed():
 
     # keep LED on during network fetch/display for clearer feedback
     try:
-        show_image(lcd, SERVER, player=current_player, face="front")
+        show_image(lcd, SERVER, player=current_player, face="front", counter=counter)
     except Exception as e:
         print("Error fetching/displaying player {}: {}".format(current_player, e))
 
@@ -175,13 +173,33 @@ try:
 except Exception as e:
     print("button module not available or failed to init:", e)
     _use_poll_fallback = True
+    
+# When touch changes the counter, update and re-draw the current player's image:
+def touch_increment():
+    global counter
+    counter += 1
+    print("counter ->", counter)
+    try:
+        show_image(lcd, SERVER, player=current_player, face="front", counter=counter)
+    except Exception as e:
+        print("display error:", e)
+
+def touch_decrement():
+    global counter
+    counter -= 1
+    print("counter ->", counter)
+    try:
+        show_image(lcd, SERVER, player=current_player, face="front", counter=counter)
+    except Exception as e:
+        print("display error:", e)
+
 
 # --------------------------
 # Start: show initial player
 # --------------------------
 print("Showing initial player", current_player)
 try:
-    show_image(lcd, SERVER, player=current_player, face="front")
+    show_image(lcd, SERVER, player=current_player, face="front", counter=counter)
 except Exception as e:
     print("Initial display error:", e)
 
