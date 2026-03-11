@@ -28,7 +28,7 @@ def show_image(lcd, server, player=1, face="front", counter=None):
             # Draw overlay only on the top strip (strip_idx == 0)
             if strip_idx == 0 and counter is not None and counter != 0:
                 try:
-                    rect_w = 110
+                    rect_w = 90
                     rect_h = 30
                     x = (lcd.width - rect_w) // 2
                     y = lcd.height - rect_h - 8  # a few pixels above bottom of top strip
@@ -45,7 +45,7 @@ def show_image(lcd, server, player=1, face="front", counter=None):
                     # Approximate centering (8 px per char)
                     char_w = 8
                     text_x = x + max(6, (rect_w - len(msg) * char_w) // 2)
-                    text_y = y + (rect_h // 2) - 0
+                    text_y = y + (rect_h // 2) - 3
 
                     # Draw text (some builds may not implement text; protect with try)
                     try:
