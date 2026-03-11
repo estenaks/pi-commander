@@ -8,14 +8,47 @@ from secrets import SERVER
 # LCD driver (unchanged)
 # --------------------------
 class LCD_3inch5(framebuf.FrameBuffer):
+    """
+    Existing display class (keeps all previous methods) with touch init + touch_read
+    added so your main loop can call lcd.touch_get() exactly like the working demo.
+    Replace the existing class in pico/main.py with this class body (rest of file unchanged).
+    """
+
+    # Touch controller pins (kept local to this class so you don't need module-level constants)
+    TP_CS = 16
+    TP_IRQ = 17
+
     def __init__(self):
+        # display colours
+        self.RED   =   0x07E0
+        self.GREEN =   0x001f
+        self.BLUE  =   0xf800
+        self.WHITE =   0xffff
+        self.BLACK =   0x0000
+
+        # framebuffer dimensions for one strip
+        self.width  = 320
+        self.height = 160
+
+        # LCD control pins (same as before)
         self.cs  = Pin(9,  Pin.OUT)
         self.rst = Pin(15, Pin.OUT)
         self.dc  = Pin(8,  Pin.OUT)
+
+        # Touch controller pins
+        # tp_cs is the touch controller chip select (output)
+        self.tp_cs = Pin(self.TP_CS, Pin.OUT)
+        # irq is the touch interrupt line; use internal pull-up so idle == 1
+        self.irq = Pin(self.TP_IRQ, Pin.IN, Pin.PULL_UP)
+
+        # bring lines to idle states
         self.cs(1); self.dc(1); self.rst(1)
+        self.tp_cs(1)
+
+        # high-speed SPI for display
         self.spi = SPI(1, 60_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
-        self.width  = 320
-        self.height = 160
+
+        # framebuffer for one strip (RGB565)
         self.buffer = bytearray(self.width * self.height * 2)
         super().__init__(self.buffer, self.width, self.height, framebuf.RGB565)
         self._buf1 = bytearray(1)
@@ -68,6 +101,91 @@ class LCD_3inch5(framebuf.FrameBuffer):
     def show_mid(self):  self._show(0x0A0, 0x13F)
     def show_down(self): self._show(0x140, 0x1DF)
 
+    def bl_ctrl(self, duty):
+        pwm = PWM(Pin(13))
+        pwm.freq(1000)
+        if duty >= 100:
+            pwm.duty_u16(65535)
+        else:
+            pwm.duty_u16(655 * duty)
+
+    def draw_point(self, x, y, color):
+        self._cmd(0x2A)
+        self._dat((x-2) >> 8); self._dat((x-2) & 0xff)
+        self._dat(x >> 8); self._dat(x & 0xff)
+
+        self._cmd(0x2B)
+        self._dat((y-2) >> 8); self._dat((y-2) & 0xff)
+        self._dat(y >> 8); self._dat(y & 0xff)
+
+        self._cmd(0x2C)
+
+        self.cs(1)
+        self.dc(1)
+        self.cs(0)
+        for i in range(0, 9):
+            # write hi, lo bytes
+            self.spi.write(bytearray([(color >> 8) & 0xFF]))
+            self.spi.write(bytearray([color & 0xFF]))
+        self.cs(1)
+
+    # ---------------------
+    # Touch helpers
+    # ---------------------
+    def touch_present(self):
+        """Return True if touch controller reports a touch (IRQ low)."""
+        # irq is pulled-up; when touched the controller pulls it low.
+        try:
+            return self.irq() == 0
+        except Exception:
+            # Some boards/micropython variants use value() - support both
+            try:
+                return self.irq.value() == 0
+            except Exception:
+                return False
+
+    def touch_get(self):
+        """
+        Read the resistive touch controller and return averaged [X_point, Y_point],
+        or None if no touch is present.
+
+        Matches the demo: uses lower SPI clock, selects touch CS, sends 0xD0/0x90,
+        reads 3 samples and returns their average.
+        """
+        # If no touch, return None quickly
+        if not self.touch_present():
+            return None
+
+        # switch to lower SPI speed for touch controller
+        self.spi = SPI(1, 5_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
+        # select touch controller
+        self.tp_cs(0)
+
+        X_Point = 0
+        Y_Point = 0
+        try:
+            for i in range(3):
+                # read X (command 0xD0)
+                self.spi.write(bytearray([0xD0]))
+                rd = self.spi.read(2)
+                time.sleep_us(10)
+                X_Point += (((rd[0] << 8) + rd[1]) >> 3)
+
+                # read Y (command 0x90)
+                self.spi.write(bytearray([0x90]))
+                rd = self.spi.read(2)
+                time.sleep_us(10)
+                Y_Point += (((rd[0] << 8) + rd[1]) >> 3)
+
+            X_Point = X_Point / 3.0
+            Y_Point = Y_Point / 3.0
+        finally:
+            # deselect touch controller and restore high-speed SPI for display
+            self.tp_cs(1)
+            self.spi = SPI(1, 60_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
+
+        return [X_Point, Y_Point]
+
 
 lcd = LCD_3inch5()
 gc.collect()
@@ -109,10 +227,9 @@ def loading_screen(lcd, player, repeat_each_strip=True):
 # --------------------------
 # Button + LED setup
 # --------------------------
-DEFAULT_BUTTON_PIN = 2   # placeholder — replace with physical pin number on your board
-LED_PIN = 25              # Pico on-board LED is usually GPIO25
-
+DEFAULT_BUTTON_PIN = 2 
 current_player = 1
+current_face = "front"
 _busy = False  # prevent re-entrancy
 
 counter = 0
@@ -174,24 +291,33 @@ except Exception as e:
     print("button module not available or failed to init:", e)
     _use_poll_fallback = True
     
-# When touch changes the counter, update and re-draw the current player's image:
-def touch_increment():
-    global counter
-    counter += 1
-    print("counter ->", counter)
-    try:
-        show_image(lcd, SERVER, player=current_player, face="front", counter=counter)
-    except Exception as e:
-        print("display error:", e)
+# Config toggles for debugging and orientation
+DEBUG_TOUCH = True      # set True to print raw and mapped values to REPL
+ORIENT_SWAP = False     # if True, swap raw indices when mapping to screen X (use if mapping looks flipped)
 
-def touch_decrement():
-    global counter
-    counter -= 1
-    print("counter ->", counter)
-    try:
-        show_image(lcd, SERVER, player=current_player, face="front", counter=counter)
-    except Exception as e:
-        print("display error:", e)
+# counter state and debounce as before
+# counter = 0
+DEBOUNCE_MS = 300
+last_change_ts = 0
+
+def map_touch_to_screen(raw_x, raw_y, lcd):
+    """
+    Map the raw touch readings to screen X/Y (same math as your working example).
+    The demo used get[1] for X mapping; this function supports ORIENT_SWAP to swap indices.
+    Returns (mapped_x, mapped_y)
+    """
+    if ORIENT_SWAP:
+        # swap (use raw_x for X mapping instead of raw_y)
+        mapped_x = int((raw_x - 430) * lcd.width / 3270)
+        mapped_y = 320 - int((raw_y - 430) * 320 / 3270)
+    else:
+        mapped_x = int((raw_y - 430) * lcd.width / 3270)
+        mapped_y = 320 - int((raw_x - 430) * 320 / 3270)
+
+    # clamp mapped_x to [0, lcd.width]
+    if mapped_x < 0: mapped_x = 0
+    if mapped_x > lcd.width: mapped_x = lcd.width
+    return mapped_x, mapped_y
 
 
 # --------------------------
@@ -217,5 +343,60 @@ while True:
         except Exception:
             # If poll fails, continue; avoid crashing
             pass
-    # Keep the interpreter alive; scheduled callbacks will run
-    time.sleep(0.25)
+    get = None
+    try:
+        get = lcd.touch_get()
+    except Exception as e:
+        # keep the loop robust if touch_get fails occasionally
+        get = None
+
+    if get is not None:
+        raw_x, raw_y = get[0], get[1]
+
+        mapped_x, mapped_y = map_touch_to_screen(raw_x, raw_y, lcd)
+
+        if DEBUG_TOUCH:
+            print("raw:", raw_x, raw_y, "mapped:", mapped_x, mapped_y)
+
+        MAP_H = 320
+
+        # thresholds for top / bottom quarters
+        bottom_threshold = MAP_H // 4           # bottommost quarter (0..MAP_H/4)
+        top_threshold = (MAP_H * 3) // 4        # topmost quarter (3/4..MAP_H)
+
+        now = time.ticks_ms()
+        if time.ticks_diff(now, last_change_ts) >= DEBOUNCE_MS:
+            # Use mapped_y because the display is rotated: vertical touch axis maps to +/- zones.
+            if mapped_y >= top_threshold:
+                # topmost quadrant -> increment (this used to be "right")
+                counter += 1
+                last_change_ts = now
+                print("TOUCH TOP -> counter", counter)
+                try:
+                    show_image(lcd, SERVER, player=current_player, face="front", counter=counter)
+                except Exception as e:
+                    print("display error:", e)
+
+            elif mapped_y < bottom_threshold:
+                # bottommost quadrant -> decrement (this used to be "left")
+                counter -= 1
+                last_change_ts = now
+                print("TOUCH BOTTOM -> counter", counter)
+                try:
+                    show_image(lcd, SERVER, player=current_player, face="front", counter=counter)
+                except Exception as e:
+                    print("display error:", e)
+            else:
+                # middle zone -> flip the card face
+                current_face = "back" if current_face == "front" else "front"
+                last_change_ts = now
+                print("TOUCH MIDDLE -> flip to", current_face)
+                try:
+                    show_image(lcd, SERVER, player=current_player, face=current_face, counter=counter)
+                except Exception as e:
+                    print("display error:", e)
+        # small settle
+        time.sleep_ms(80)
+    else:
+        # no touch
+        time.sleep_ms(80)
