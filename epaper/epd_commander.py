@@ -11,7 +11,7 @@ import json
 import signal
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 import qrcode
 
 # ── Waveshare lib path ────────────────────────────────────────────────────────
@@ -27,7 +27,10 @@ from waveshare_epd import epd4in01f
 # ── Config ────────────────────────────────────────────────────────────────────
 API_URL        = "http://127.0.0.1/api/current/1"
 CONFIG_URL_API = "http://127.0.0.1/api/config-url"
-POLL_SECS      = 5
+POLL_SECS      = 1
+
+FAST_CONTRAST_FACTOR = 1.4   # 1.0 = no change. Increase to boost contrast for fast dither.
+FAST_AUTOCONTRAST    = False # set True to run ImageOps.autocontrast before enhancement
 
 EPD_W = 640
 EPD_H = 400
@@ -126,6 +129,16 @@ def prepare_image(raw_bytes: bytes, precise: bool = False) -> Image.Image:
         canvas = Image.new("RGB", (EPD_W, EPD_H), (0, 0, 0))
         canvas.paste(img, (0, (EPD_H - new_h) // 2))
         img = canvas
+
+    # QUICK CONTRAST ADJUSTMENT FOR FAST PATH
+    if not precise:
+        if FAST_AUTOCONTRAST:
+            log.info("Applying autocontrast for fast path")
+            img = ImageOps.autocontrast(img)
+        if FAST_CONTRAST_FACTOR != 1.0:
+            log.info(f"Applying contrast x{FAST_CONTRAST_FACTOR} for fast dither")
+            img = ImageEnhance.Contrast(img).enhance(FAST_CONTRAST_FACTOR)
+
     if precise:
         log.info("Running Floyd-Steinberg precise dither (foil — this takes a while)…")
         img = floyd_steinberg_precise(img)
