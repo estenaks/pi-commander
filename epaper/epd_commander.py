@@ -29,8 +29,15 @@ API_URL        = "http://127.0.0.1/api/current/1"
 CONFIG_URL_API = "http://127.0.0.1/api/config-url"
 POLL_SECS      = 1
 
-FAST_CONTRAST_FACTOR = 1.4   # 1.0 = no change. Increase to boost contrast for fast dither.
+FAST_CONTRAST_FACTOR = 1.0   # 1.0 = no change. Increase to boost contrast for fast dither.
 FAST_AUTOCONTRAST    = False # set True to run ImageOps.autocontrast before enhancement
+
+#^might have to remove
+
+BORDER_TARGET_RGB = np.array([22, 20, 15], dtype=np.int32)
+# Euclidean distance threshold — pixels within this distance will be forced to black.
+# Tune this value while testing. 10..25 is a reasonable range to try.
+BORDER_DISTANCE_THRESHOLD = 18
 
 EPD_W = 640
 EPD_H = 400
@@ -122,6 +129,7 @@ def prepare_image(raw_bytes: bytes, precise: bool = False) -> Image.Image:
     scale = EPD_W / src_w
     new_h = round(src_h * scale)
     img   = img.resize((EPD_W, new_h), Image.LANCZOS)
+
     if new_h > EPD_H:
         top = (new_h - EPD_H) // 2
         img = img.crop((0, top, EPD_W, top + EPD_H))
@@ -130,7 +138,22 @@ def prepare_image(raw_bytes: bytes, precise: bool = False) -> Image.Image:
         canvas.paste(img, (0, (EPD_H - new_h) // 2))
         img = canvas
 
-    # QUICK CONTRAST ADJUSTMENT FOR FAST PATH
+    # --- Step 1: force near-border colour to true black -------------------
+    try:
+        arr = np.array(img, dtype=np.int32)
+        # Euclidean distance from target border colour per pixel
+        diff = arr - BORDER_TARGET_RGB[np.newaxis, np.newaxis, :]
+        dist = np.sqrt((diff ** 2).sum(axis=2))
+        mask = dist <= BORDER_DISTANCE_THRESHOLD
+        if mask.any():
+            log.info(f"Forcing {mask.sum()} pixels near {BORDER_TARGET_RGB.tolist()} -> black (threshold={BORDER_DISTANCE_THRESHOLD})")
+            arr[mask] = [0, 0, 0]
+            img = Image.fromarray(arr.astype(np.uint8), "RGB")
+    except Exception as e:
+        log.warning(f"Border-black adjustment failed: {e}")
+    # ---------------------------------------------------------------------
+
+    # QUICK CONTRAST ADJUSTMENT FOR FAST PATH (optional)
     if not precise:
         if FAST_AUTOCONTRAST:
             log.info("Applying autocontrast for fast path")
@@ -163,8 +186,8 @@ def make_qr_splash(config_url: str) -> Image.Image:
     qr_y    = (EPD_H - qr_size) // 2 - 20
     img.paste(qr_img, (qr_x, qr_y))
 
-    font_large = ImageFont.load_default(size=20)
-    font_small = ImageFont.load_default(size=15)
+    font_large = ImageFont.load_default(size=50)
+    font_small = ImageFont.load_default(size=30)
 
     lines_above = [("No card configured.", font_large)]
     lines_below = [
