@@ -11,7 +11,7 @@ import json
 import signal
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageOps
 import qrcode
 
 # ── Waveshare lib path ────────────────────────────────────────────────────────
