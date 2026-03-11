@@ -383,7 +383,21 @@
 				placeholder='Search card name (fuzzy), e.g. "norin the wary"'
 			/>
 			<button id="searchBtn">Search</button>
+
+			<!-- Keep the commander button for backwards compatibility, but it now
+			     uses the generalized API fields under the hood. -->
 			<button id="randomBtn">Get random commander</button>
+
+			<!-- New Momir Vig button -->
+			<button
+				id="momirBtn"
+				disabled
+				title="Get a random creature with the specified mana value (requires mana value)"
+				style="background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.0));"
+			>
+				Momir Vig: random creature
+			</button>
+
 			<button
 				id="foilBtn"
 				disabled
@@ -435,6 +449,41 @@
 				the checked set (e.g. only {R} or exactly {U,B}, etc). If nothing is
 				checked, random is any color identity.
 			</div>
+
+			<hr style="margin: 12px 0;" />
+
+			<div style="margin-bottom: 8px"><strong>Mana value (cmc)</strong></div>
+			<input id="cmc" type="text" placeholder='e.g. "3" or ">=3" or "2..4"' />
+
+			<div class="muted" style="margin-top: 8px">
+				Enter an exact mana value (3), an operator (>=3), or a range (2..4).
+				This value is used by Momir Vig and may also be sent with the commander request.
+			</div>
+
+			<hr style="margin: 12px 0;" />
+
+			<div style="margin-bottom: 8px"><strong>Card type filters (inclusive)</strong></div>
+			<label><input type="checkbox" class="ct" value="creature" /> Creature</label>
+			<label><input type="checkbox" class="ct" value="artifact" /> Artifact</label>
+			<label><input type="checkbox" class="ct" value="enchantment" /> Enchantment</label>
+			<label><input type="checkbox" class="ct" value="planeswalker" /> Planeswalker</label>
+			<label><input type="checkbox" class="ct" value="sorcery" /> Sorcery</label>
+			<label><input type="checkbox" class="ct" value="instant" /> Instant</label>
+			<label><input type="checkbox" class="ct" value="land" /> Land</label>
+
+			<div class="muted" style="margin-top: 8px">
+				Checked types are added with AND semantics (t:type t:other). If you want OR semantics
+				(e.g. creature OR artifact) you can later extend the UI to send raw q.
+			</div>
+
+			<hr style="margin: 12px 0;" />
+
+			<div style="margin-bottom: 8px"><strong>Arbitrary is: labels</strong></div>
+			<input id="isLabels" type="text" placeholder='comma-separated, e.g. "legendary, token"' />
+			<div class="muted">
+				Use this to pass arbitrary Scryfall is: labels (e.g. <code>is:commander</code>, <code>is:funny</code>).
+				Multiple comma-separated entries are supported.
+			</div>
 		</fieldset>
 
 		<div class="status" id="status"></div>
@@ -453,6 +502,8 @@
 			const qrCanvas = document.getElementById("qr");
 			const qrLabelEl = document.getElementById("qrLabel");
 			const foilBtn = document.getElementById("foilBtn");
+			const cmcEl = document.getElementById("cmc");
+			const momirBtn = document.getElementById("momirBtn");
 
 			let lastQuery = null; // tracks the most recently sent card name
 			let isFoil = false; // current foil state for the selected player
@@ -477,6 +528,18 @@
 				return Array.from(document.querySelectorAll("input.ci:checked"))
 					.map((cb) => cb.value)
 					.sort();
+			}
+
+			function selectedCardTypes() {
+				return Array.from(document.querySelectorAll("input.ct:checked"))
+					.map((cb) => cb.value)
+					.filter(Boolean);
+			}
+
+			function parseIsLabels() {
+				const v = (document.getElementById("isLabels").value || "").trim();
+				if (!v) return [];
+				return v.split(",").map(s => s.trim()).filter(Boolean);
 			}
 
 			function playerNum() {
@@ -583,18 +646,34 @@
 				updateFoilBtn();
 			}
 
-			async function doRandomCommander() {
+			// Build a generalized payload from the UI (used by commander and other calls)
+			function buildRandomPayload() {
 				const colors = selectedColors();
-				const p = playerNum();
+				const card_types = selectedCardTypes();
+				const is_labels = parseIsLabels();
+				const cmcRaw = (cmcEl.value || "").trim();
+				const payload = {};
+				if (colors.length) payload.colors = colors;
+				payload.identity_match = "exact";
+				if (card_types.length) payload.card_types = card_types;
+				if (is_labels.length === 1) payload.is = is_labels[0];
+				else if (is_labels.length > 1) payload.is = is_labels;
+				if (cmcRaw) payload.cmc = cmcRaw;
+				return payload;
+			}
 
-				const label = colors.length ? ` (exact id=${colors.join("")})` : "";
+			async function doRandomCommander() {
+				const p = playerNum();
+				const payload = buildRandomPayload();
+				// ensure commander label present (explicit is: is preferred)
+				if (!payload.is) payload.is = "commander";
+				// For backwards compatibility, also set mode if needed (server accepts both)
+				payload.mode = "commander";
+
+				const label = (payload.colors || []).length ? ` (exact id=${(payload.colors || []).join("")})` : "";
 				setBusy(`Getting random commander${label} (player ${p})...`);
 
-				const { r, data } = await postJson(`/api/random/${p}`, {
-					colors,
-					identity_match: "exact",
-					mode: "commander",
-				});
+				const { r, data } = await postJson(`/api/random/${p}`, payload);
 
 				jsonEl.textContent = JSON.stringify(data, null, 2);
 				if (!r.ok) {
@@ -603,6 +682,32 @@
 				}
 
 				statusEl.textContent = `Player ${p} now showing (random commander): ${data.name}`;
+				previewEl.src = data.border_crop_url;
+				lastQuery = data.name;
+				isFoil = false;
+				updateFoilBtn();
+			}
+
+			async function doMomir() {
+				const cmcRaw = (cmcEl.value || "").trim();
+				if (!cmcRaw) return; // button should be disabled, but guard anyway
+				const p = playerNum();
+				// Build payload: mana value + type includes creature
+				const payload = {
+					cmc: cmcRaw,
+					card_types: ["creature"],
+				};
+				setBusy(`Getting random creature with cmc=${cmcRaw} (player ${p})...`);
+
+				const { r, data } = await postJson(`/api/random/${p}`, payload);
+
+				jsonEl.textContent = JSON.stringify(data, null, 2);
+				if (!r.ok) {
+					statusEl.textContent = "Error (see JSON below)";
+					return;
+				}
+
+				statusEl.textContent = `Player ${p} now showing (Momir): ${data.name}`;
 				previewEl.src = data.border_crop_url;
 				lastQuery = data.name;
 				isFoil = false;
@@ -620,12 +725,26 @@
 				}
 			}
 
+			// Enable Momir only when cmc is provided
+			function updateMomirBtn() {
+				const v = (cmcEl.value || "").trim();
+				if (v) {
+					momirBtn.disabled = false;
+				} else {
+					momirBtn.disabled = true;
+				}
+			}
+			cmcEl.addEventListener("input", updateMomirBtn);
+
 			document
 				.getElementById("searchBtn")
 				.addEventListener("click", () => doSearch(qEl.value));
 			document
 				.getElementById("randomBtn")
 				.addEventListener("click", () => doRandomCommander());
+			document
+				.getElementById("momirBtn")
+				.addEventListener("click", () => doMomir());
 			qEl.addEventListener("keydown", (e) => {
 				if (e.key === "Enter") doSearch(qEl.value);
 			});
@@ -664,6 +783,7 @@
 			renderPlayerQr();
 			qEl.value = DEFAULT_QUERY;
 			doSearch(DEFAULT_QUERY);
+			updateMomirBtn();
 
 			// ── Hamburger nav ──────────────────────────────────────────────────────
 			(function () {
