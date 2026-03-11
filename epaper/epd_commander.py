@@ -48,7 +48,7 @@ BLUE_RED_SCALE   = 0.45        # scale applied to R for matched pixels (reduce r
 BLUE_GREEN_SCALE = 0.6         # scale applied to G for matched pixels (reduce green)
 BLUE_BLUE_SCALE  = 2.4         # scale applied to B for matched pixels (increase blue)
 # If you only want this for the fast path, set to True and the code below will skip when precise=True
-APPLY_BLUE_AMPLIFY_ONLY_FAST = True
+APPLY_BLUE_AMPLIFY_ONLY_FAST = False
 
 EPD_W = 640
 EPD_H = 400
