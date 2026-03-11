@@ -429,27 +429,97 @@ def api_search_player(player: int):
 def api_random_player(player: int):
     _require_player(player)
     payload = request.get_json(silent=True) or {}
-    colors  = payload.get("colors") or []
+
+    # Colors / identity (existing)
+    colors = payload.get("colors") or []
     identity_match = (payload.get("identity_match") or "exact").strip().lower()
-    mode    = (payload.get("mode") or "commander").strip().lower()
+
+    # New generalized filters
+    cmc = payload.get("cmc", None)                # int or string (e.g. 3, ">=3", "2..4")
+    card_types = payload.get("card_types") or []  # list of strings, e.g. ["creature"]
+    is_labels = payload.get("is") or []           # string or list; arbitrary is: labels
+
+    # Backwards-compatibility: support the old 'mode' if present
+    mode = (payload.get("mode") or "").strip().lower()
 
     allowed = {"W", "U", "B", "R", "G"}
     colors = [c.upper() for c in colors if isinstance(c, str) and c.upper() in allowed]
 
     try:
-        # mode q
-        if mode == "commander":
-            mode_q = "is:commander"
-        else:
-            mode_q = "t:legendary t:creature"
-
         q_parts = []
+
+        # colors / identity -> id: or id>=
         if colors:
             colors_str = "".join(colors)
             op = "=" if identity_match == "exact" else ">="
             q_parts.append(f"id{op}{colors_str}")
 
-        q_parts.append(mode_q)
+        # card types -> t:token per entry (AND semantics)
+        if isinstance(card_types, str) and card_types:
+            card_types = [card_types]
+        for ct in card_types:
+            ct = (ct or "").strip()
+            if not ct:
+                continue
+            # Allow callers to include operators/prefixes; otherwise prefix with t:
+            if ct.startswith(("t:", "-t:")):
+                q_parts.append(ct)
+            else:
+                q_parts.append(f"t:{ct}")
+
+        # is: labels (accept string or list). If label already contains 'is:' or leading '-',
+        # pass it through; otherwise prefix with 'is:'.
+        if isinstance(is_labels, str) and is_labels:
+            is_labels = [is_labels]
+        for lb in is_labels:
+            lb = (lb or "").strip()
+            if not lb:
+                continue
+            if lb.startswith("is:") or lb.startswith("-is:") or lb.startswith("-"):
+                q_parts.append(lb)
+            else:
+                q_parts.append(f"is:{lb}")
+
+        # cmc handling — numeric equality preferred; strings passed through where appropriate
+        if cmc is not None and cmc != "":
+            # numeric (int/float) or numeric string -> cmc=X
+            if isinstance(cmc, (int, float)) or (isinstance(cmc, str) and cmc.strip().lstrip("+-").replace(".", "", 1).isdigit()):
+                cmc_val = int(float(cmc))
+                q_parts.append(f"cmc={cmc_val}")
+            else:
+                cmc_str = str(cmc).strip()
+                # If caller provided an operator prefix (>=, <=, >, <) or a range with '..', pass through
+                if cmc_str.startswith((">", "<", "=", "!")) or ".." in cmc_str:
+                    # ensure it has 'cmc' prefix if not already
+                    if cmc_str.startswith("cmc"):
+                        q_parts.append(cmc_str)
+                    else:
+                        q_parts.append(f"cmc{cmc_str}")
+                else:
+                    # default to equality if ambiguous
+                    q_parts.append(f"cmc={cmc_str}")
+
+        # Back-compat: if 'mode' provided, map to previous query fragments
+        # (kept for existing clients; frontend should prefer the new fields)
+        if mode:
+            if mode == "commander":
+                q_parts.append("is:commander")
+            elif mode == "creature":
+                q_parts.append("t:creature")
+            else:
+                # previous default: legendary creature for non-commander modes
+                q_parts.append("t:legendary")
+                q_parts.append("t:creature")
+
+        # If the caller provided an explicit raw query (q) — append it verbatim.
+        raw_q = (payload.get("q") or "").strip()
+        if raw_q:
+            q_parts.append(raw_q)
+
+        if not q_parts:
+            # If nothing is specified, fall back to the previous default behavior:
+            # select a commander by default (same as before).
+            q_parts.append("is:commander")
 
         # quote each q value but preserve '=' and ':' characters so they appear as in your working URL
         params = "+".join(urllib.parse.quote(p, safe="=:") for p in q_parts)
