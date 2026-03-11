@@ -109,7 +109,7 @@ def loading_screen(lcd, player, repeat_each_strip=True):
 # --------------------------
 # Button + LED setup
 # --------------------------
-DEFAULT_BUTTON_PIN = 4   # placeholder — replace with physical pin number on your board
+DEFAULT_BUTTON_PIN = 15   # placeholder — replace with physical pin number on your board
 LED_PIN = 25              # Pico on-board LED is usually GPIO25
 
 current_player = 1

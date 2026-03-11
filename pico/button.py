@@ -66,7 +66,7 @@ def _irq(pin):
         # No schedule available on this port: set pollable flag.
         _pressed_flag = True
 
-def init(pin_no=4, callback=None, debounce_ms=200, pull_up=True, trigger_falling=True):
+def init(pin_no=15, callback=None, debounce_ms=200, pull_up=True, trigger_falling=True):
     """
     Initialize the button IRQ.
 
