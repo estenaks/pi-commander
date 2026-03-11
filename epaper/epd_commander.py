@@ -29,15 +29,26 @@ API_URL        = "http://127.0.0.1/api/current/1"
 CONFIG_URL_API = "http://127.0.0.1/api/config-url"
 POLL_SECS      = 1
 
+
+# CONTRAST:
 FAST_CONTRAST_FACTOR = 1.0   # 1.0 = no change. Increase to boost contrast for fast dither.
 FAST_AUTOCONTRAST    = False # set True to run ImageOps.autocontrast before enhancement
 
 #^might have to remove
-
+# BLACK BORDER:
 BORDER_TARGET_RGB = np.array([22, 20, 15], dtype=np.int32)
 # Euclidean distance threshold — pixels within this distance will be forced to black.
 # Tune this value while testing. 10..25 is a reasonable range to try.
 BORDER_DISTANCE_THRESHOLD = 18
+
+# BLUE
+TARGET_PALE_BLUE_RGB = np.array([175, 220, 230], dtype=np.int32)
+BLUE_DISTANCE_THRESHOLD = 40   # how close a pixel must be to be considered the pale-blue target
+BLUE_RED_SCALE   = 0.45        # scale applied to R for matched pixels (reduce red)
+BLUE_GREEN_SCALE = 0.6         # scale applied to G for matched pixels (reduce green)
+BLUE_BLUE_SCALE  = 2.4         # scale applied to B for matched pixels (increase blue)
+# If you only want this for the fast path, set to True and the code below will skip when precise=True
+APPLY_BLUE_AMPLIFY_ONLY_FAST = True
 
 EPD_W = 640
 EPD_H = 400
