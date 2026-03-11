@@ -334,6 +334,7 @@ except Exception as e:
 # --------------------------
 # If fallback polling is required (no micropython.schedule), poll the button.poll_pressed() flag.
 # Otherwise we just sleep; scheduled callbacks will run when IRQ fires.
+# comment for git pull whatever
 while True:
     if _use_poll_fallback:
         try:
