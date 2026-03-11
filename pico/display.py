@@ -45,7 +45,7 @@ def show_image(lcd, server, player=1, face="front", counter=None):
                     # Approximate centering (8 px per char)
                     char_w = 8
                     text_x = x + max(6, (rect_w - len(msg) * char_w) // 2)
-                    text_y = y + (rect_h // 2) - 7
+                    text_y = y + (rect_h // 2) - 0
 
                     # Draw text (some builds may not implement text; protect with try)
                     try:
