@@ -1,65 +1,33 @@
-# pico/main.py
-# Full patched file: integrates non-blocking NeoPixel behaviors driven by API color codes.
-# - Non-blocking LEDController that animates indefinitely until a button press requests change.
-# - Robust API fetch for color codes (handles SERVER with/without scheme).
-# - Button IRQ sets a simple request flag; main loop does heavy work and switches LED behavior.
-#
-# NOTE: Save pio_neopixel.py alongside this file on the Pico (the PIO driver used here).
-#       Adjust NP_PIN, NP_ORDER or LED pin if your board differs.
-
 from machine import Pin, SPI, PWM
-import framebuf, time, gc, sys
+import framebuf, time, gc
 import urequests
 from display import show_image
 from secrets import SERVER
 
-# New import: PIO NeoPixel driver (place pio_neopixel.py next to this file)
+# PIO NeoPixel driver (optional)
 try:
     from pio_neopixel import NeoPixelPIO
 except Exception:
     NeoPixelPIO = None
 
 # --------------------------
-# LCD driver (unchanged)
+# LCD driver (kept minimal for used methods)
 # --------------------------
 class LCD_3inch5(framebuf.FrameBuffer):
-    """
-    Existing display class (keeps all previous methods) with touch init + touch_read
-    added so your main loop can call lcd.touch_get() exactly like the working demo.
-    """
-
     TP_CS = 16
     TP_IRQ = 17
 
     def __init__(self):
-        # display colours
-        self.RED   =   0x07E0
-        self.GREEN =   0x001f
-        self.BLUE  =   0xf800
-        self.WHITE =   0xffff
-        self.BLACK =   0x0000
-
-        # framebuffer dimensions for one strip
-        self.width  = 320
+        self.width = 320
         self.height = 160
-
-        # LCD control pins
         self.cs  = Pin(9,  Pin.OUT)
         self.rst = Pin(15, Pin.OUT)
         self.dc  = Pin(8,  Pin.OUT)
-
-        # Touch controller pins
         self.tp_cs = Pin(self.TP_CS, Pin.OUT)
         self.irq = Pin(self.TP_IRQ, Pin.IN, Pin.PULL_UP)
-
-        # bring lines to idle states
         self.cs(1); self.dc(1); self.rst(1)
         self.tp_cs(1)
-
-        # high-speed SPI for display
         self.spi = SPI(1, 60_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
-
-        # framebuffer for one strip (RGB565)
         self.buffer = bytearray(self.width * self.height * 2)
         super().__init__(self.buffer, self.width, self.height, framebuf.RGB565)
         self._buf1 = bytearray(1)
@@ -102,7 +70,7 @@ class LCD_3inch5(framebuf.FrameBuffer):
         self._dat(0x01); self._dat(0x3F)
         self._cmd(0x2B)
         self._dat(y_start >> 8); self._dat(y_start & 0xFF)
-        self._dat(y_end   >> 8); self._dat(y_end   & 0xFF)
+        self._dat(y_end   >> 8); self._dat(y_end & 0xFF)
         self._cmd(0x2C)
         self.cs(1); self.dc(1); self.cs(0)
         self.spi.write(self.buffer)
@@ -112,39 +80,7 @@ class LCD_3inch5(framebuf.FrameBuffer):
     def show_mid(self):  self._show(0x0A0, 0x13F)
     def show_down(self): self._show(0x140, 0x1DF)
 
-    def bl_ctrl(self, duty):
-        pwm = PWM(Pin(13))
-        pwm.freq(1000)
-        if duty >= 100:
-            pwm.duty_u16(65535)
-        else:
-            pwm.duty_u16(655 * duty)
-
-    def draw_point(self, x, y, color):
-        self._cmd(0x2A)
-        self._dat((x-2) >> 8); self._dat((x-2) & 0xff)
-        self._dat(x >> 8); self._dat(x & 0xff)
-
-        self._cmd(0x2B)
-        self._dat((y-2) >> 8); self._dat((y-2) & 0xff)
-        self._dat(y >> 8); self._dat(y & 0xff)
-
-        self._cmd(0x2C)
-
-        self.cs(1)
-        self.dc(1)
-        self.cs(0)
-        for i in range(0, 9):
-            # write hi, lo bytes
-            self.spi.write(bytearray([(color >> 8) & 0xFF]))
-            self.spi.write(bytearray([color & 0xFF]))
-        self.cs(1)
-
-    # ---------------------
-    # Touch helpers
-    # ---------------------
     def touch_present(self):
-        """Return True if touch controller reports a touch (IRQ low)."""
         try:
             return self.irq() == 0
         except Exception:
@@ -154,41 +90,27 @@ class LCD_3inch5(framebuf.FrameBuffer):
                 return False
 
     def touch_get(self):
-        """
-        Read the resistive touch controller and return averaged [X_point, Y_point],
-        or None if no touch is present.
-        """
         if not self.touch_present():
             return None
-
-        # switch to lower SPI speed for touch controller
         self.spi = SPI(1, 5_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
-        # select touch controller
         self.tp_cs(0)
-
         X_Point = 0
         Y_Point = 0
         try:
             for i in range(3):
-                # read X (command 0xD0)
                 self.spi.write(bytearray([0xD0]))
                 rd = self.spi.read(2)
                 time.sleep_us(10)
                 X_Point += (((rd[0] << 8) + rd[1]) >> 3)
-
-                # read Y (command 0x90)
                 self.spi.write(bytearray([0x90]))
                 rd = self.spi.read(2)
                 time.sleep_us(10)
                 Y_Point += (((rd[0] << 8) + rd[1]) >> 3)
-
             X_Point = X_Point / 3.0
             Y_Point = Y_Point / 3.0
         finally:
-            # deselect touch controller and restore high-speed SPI for display
             self.tp_cs(1)
             self.spi = SPI(1, 60_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
-
         return [X_Point, Y_Point]
 
 
@@ -196,21 +118,16 @@ lcd = LCD_3inch5()
 gc.collect()
 
 # --------------------------
-# NeoPixel setup + non-blocking LED controller
+# NeoPixel + palette
 # --------------------------
-# PIO NeoPixel: data pin GP4, single pixel. Adjust if needed.
 NP_PIN = 4
-NP_ORDER = "GRB"      # confirmed
+NP_ORDER = "GRB"
 NP_SM_ID = 0
 
-# Prototype target brightness (0.0..1.0). Change as needed.
-TARGET_BRIGHTNESS = 0.5
-
-# Fade timing parameters
+TARGET_BRIGHTNESS = 0.5    # global LED brightness (0..1)
 FADE_STEPS = 36
-FADE_STEP_DELAY = 0.02  # seconds
+FADE_STEP_DELAY = 0.02
 
-# Initialize NeoPixel PIO driver (if available)
 if NeoPixelPIO is not None:
     try:
         npixel = NeoPixelPIO(pin=NP_PIN, n=1, order=NP_ORDER, brightness=1.0, sm_id=NP_SM_ID)
@@ -220,35 +137,31 @@ if NeoPixelPIO is not None:
 else:
     npixel = None
 
-# Provide a safe 'led' for legacy blinking (onboard LED GP25)
-try:
-    led = Pin(25, Pin.OUT)
-except Exception:
-    led = None
-
-# Palette for W U B R G (use the 'second' variants)
 PALETTE_WUBRG = {
-    "W": (249, 250, 244),   # white (second)
-    "U": (14, 104, 171),    # blue (second)
-    "B": (21, 11, 0),       # black (second)
-    "R": (211, 32, 42),     # red (second)
-    "G": (0, 115, 62),      # green (second)
+    "W": (210, 210, 150),
+    "U": (0, 40, 200),
+    "B": (20, 10, 0),
+    "R": (220, 0, 0),
+    "G": (0, 115, 20),
 }
-# Golds used for 3+ behavior
 GOLD1 = (255, 191, 0)
 GOLD2 = (255, 220, 115)
 
 
+# --------------------------
+# helpers: clamp, lerp, scale
+# --------------------------
 def clamp255(v):
-    if v < 0:
-        return 0
-    if v > 255:
-        return 255
+    if v < 0: return 0
+    if v > 255: return 255
     return int(v)
 
+def lerp_tuple(a, b, t):
+    return (int(a[0] + (b[0] - a[0]) * t),
+            int(a[1] + (b[1] - a[1]) * t),
+            int(a[2] + (b[2] - a[2]) * t))
 
 def scale_color(rgb, scale):
-    """Return tuple of rgb scaled by scale (0..1)."""
     if scale <= 0:
         return (0, 0, 0)
     if scale >= 1:
@@ -258,22 +171,77 @@ def scale_color(rgb, scale):
             clamp255(int(rgb[2] * scale)))
 
 
-def lerp_tuple(a, b, t):
-    return (int(a[0] + (b[0] - a[0]) * t),
-            int(a[1] + (b[1] - a[1]) * t),
-            int(a[2] + (b[2] - a[2]) * t))
+# --------------------------
+# HSV conversions + variants (recommended)
+# --------------------------
+def rgb_to_hsv(rgb):
+    # returns (h in 0..360, s in 0..1, v in 0..1)
+    r = rgb[0] / 255.0
+    g = rgb[1] / 255.0
+    b = rgb[2] / 255.0
+    mx = max(r, g, b)
+    mn = min(r, g, b)
+    d = mx - mn
+    if d == 0:
+        h = 0.0
+    elif mx == r:
+        h = (60 * ((g - b) / d) + 360) % 360
+    elif mx == g:
+        h = (60 * ((b - r) / d) + 120) % 360
+    else:
+        h = (60 * ((r - g) / d) + 240) % 360
+    s = 0.0 if mx == 0 else d / mx
+    v = mx
+    return h, s, v
+
+def hsv_to_rgb(h, s, v):
+    # expects h in 0..360, s and v in 0..1
+    if s == 0.0:
+        val = clamp255(int(v * 255))
+        return (val, val, val)
+    h = h % 360
+    hi = int(h // 60)  # 0..5
+    f = (h / 60.0) - hi
+    p = v * (1.0 - s)
+    q = v * (1.0 - s * f)
+    t = v * (1.0 - s * (1.0 - f))
+    if hi == 0:
+        r, g, b = v, t, p
+    elif hi == 1:
+        r, g, b = q, v, p
+    elif hi == 2:
+        r, g, b = p, v, t
+    elif hi == 3:
+        r, g, b = p, q, v
+    elif hi == 4:
+        r, g, b = t, p, v
+    else:
+        r, g, b = v, p, q
+    return (clamp255(int(r * 255)), clamp255(int(g * 255)), clamp255(int(b * 255)))
+
+def variants_hsv(rgb, lighter_delta=0.30, darker_delta=0.45):
+    """
+    Return (lighter_rgb, darker_rgb).
+    - darker: reduce V by factor (v * (1 - darker_delta))
+    - lighter: push V toward 1 by fraction lighter_delta and slightly desaturate
+    """
+    h, s, v = rgb_to_hsv(rgb)
+    v_dark = max(0.0, v * (1.0 - darker_delta))
+    dark_rgb = hsv_to_rgb(h, s, v_dark)
+    v_light = min(1.0, v + (1.0 - v) * lighter_delta)
+    s_light = max(0.0, s * (1.0 - 0.15 * lighter_delta))
+    light_rgb = hsv_to_rgb(h, s_light, v_light)
+    return light_rgb, dark_rgb
+
+def second_variant(rgb, lighter_delta=0.30, darker_delta=0.45):
+    """Return (lighter, darker) using HSV variants (full-intensity values)."""
+    return variants_hsv(rgb, lighter_delta=lighter_delta, darker_delta=darker_delta)
 
 
-# Non-blocking LED controller
+# --------------------------
+# Non-blocking LED controller (shimmer + mono)
+# --------------------------
 class LEDController:
-    """
-    Stateful non-blocking LED animator.
-
-    Modes:
-      - mono: fade in to target and hold (implemented via shimmer with same color)
-      - two: alternate A and B forever (fade_in -> hold -> fade_out -> next)  [kept for backward compat]
-      - shimmer: crossfade between two arbitrary colors indefinitely (this replaces 'multi' gold shimmer)
-    """
     def __init__(self, npixel):
         self.np = npixel
         self.mode = None
@@ -282,12 +250,7 @@ class LEDController:
         self.phase_ms = 0
         self.cur_from = (0,0,0)
         self.cur_to = (0,0,0)
-        self.a_target = (0,0,0)
-        self.b_target = (0,0,0)
-        self.g1 = (0,0,0)
-        self.g2 = (0,0,0)
         self.fade_ms = int(FADE_STEP_DELAY * 1000 * FADE_STEPS)
-        self.two_hold_ms = 3000
 
     def _now(self):
         return time.ticks_ms()
@@ -298,7 +261,6 @@ class LEDController:
         self.start_ms = self._now()
         self.phase_ms = max(int(duration_ms), 1)
         self.phase = phase_name
-        # immediately draw initial color for the phase
         self._step(0.0)
 
     def _step(self, t):
@@ -313,91 +275,36 @@ class LEDController:
         if not self.mode or not self.np:
             return
         now = self._now()
-
-        if self.mode == 'mono':
-            if self.phase == 'fade_in':
-                elapsed = time.ticks_diff(now, self.start_ms)
-                if elapsed >= self.phase_ms:
-                    self._step(1.0)
-                    self.phase = 'hold'
-                else:
-                    t = elapsed / self.phase_ms
-                    self._step(t)
-            # hold: nothing to do
-
-        elif self.mode == 'two':
-            elapsed = time.ticks_diff(now, self.start_ms)
-            if elapsed >= self.phase_ms:
-                self._advance_two_phase()
-            else:
-                if self.phase_ms > 0:
-                    t = elapsed / self.phase_ms
-                    self._step(t)
-
-        elif self.mode == 'shimmer':
-            # shimmer crossfades between g1 and g2: phases 'g1_to_g2' and 'g2_to_g1'
-            elapsed = time.ticks_diff(now, self.start_ms)
-            if elapsed >= self.phase_ms:
+        elapsed = time.ticks_diff(now, self.start_ms)
+        if elapsed >= self.phase_ms:
+            if self.mode == 'mono':
+                self.phase = 'hold'
+                self._step(1.0)
+            elif self.mode == 'shimmer':
                 self._advance_shimmer_phase()
-            else:
-                t = elapsed / self.phase_ms
-                self._step(t)
-
-    # MONO helper: fades in and holds by using shimmer with identical colors
-    def start_mono(self, rgb, target_brightness=TARGET_BRIGHTNESS):
-        if not self.np:
-            return
-        tg = scale_color(rgb, target_brightness)
-        self.mode = 'mono'
-        self._start_phase((0,0,0), tg, self.fade_ms, 'fade_in')
-
-    # TWO color (left as-is, indefinite)
-    def start_two(self, a_rgb, b_rgb, target_brightness=TARGET_BRIGHTNESS, hold_ms=3000):
-        if not self.np:
-            return
-        self.mode = 'two'
-        self.two_hold_ms = hold_ms
-        self.a_target = scale_color(a_rgb, target_brightness)
-        self.b_target = scale_color(b_rgb, target_brightness)
-        self.two_phase = 'a_fade_in'
-        self._start_phase((0,0,0), self.a_target, self.fade_ms, self.two_phase)
-
-    def _advance_two_phase(self):
-        if self.two_phase == 'a_fade_in':
-            self.two_phase = 'a_hold'
-            self._start_phase(self.a_target, self.a_target, self.two_hold_ms, self.two_phase)
-        elif self.two_phase == 'a_hold':
-            self.two_phase = 'a_fade_out'
-            self._start_phase(self.a_target, (0,0,0), self.fade_ms, self.two_phase)
-        elif self.two_phase == 'a_fade_out':
-            self.two_phase = 'b_fade_in'
-            self._start_phase((0,0,0), self.b_target, self.fade_ms, self.two_phase)
-        elif self.two_phase == 'b_fade_in':
-            self.two_phase = 'b_hold'
-            self._start_phase(self.b_target, self.b_target, self.two_hold_ms, self.two_phase)
-        elif self.two_phase == 'b_hold':
-            self.two_phase = 'b_fade_out'
-            self._start_phase(self.b_target, (0,0,0), self.fade_ms, self.two_phase)
-        elif self.two_phase == 'b_fade_out':
-            self.two_phase = 'a_fade_in'
-            self._start_phase((0,0,0), self.a_target, self.fade_ms, self.two_phase)
         else:
-            self.two_phase = 'a_fade_in'
-            self._start_phase((0,0,0), self.a_target, self.fade_ms, self.two_phase)
+            t = elapsed / self.phase_ms if self.phase_ms > 0 else 1.0
+            self._step(t)
 
-    # SHIMMER (generalized crossfade between any two colors)
+    def start_mono_variants(self, rgb, lighter_delta=0.30, darker_delta=0.45, target_brightness=TARGET_BRIGHTNESS):
+        """
+        For mono: compute lighter and darker variants and shimmer between them (ping-pong).
+        This gives a more visible, hue-preserving mono animation than tiny multiplicative changes.
+        """
+        if not self.np:
+            return
+        lighter, darker = second_variant(rgb, lighter_delta=lighter_delta, darker_delta=darker_delta)
+        # start shimmer between lighter and darker; controller will apply target_brightness scaling
+        self.start_shimmer(lighter, darker, target_brightness=target_brightness)
+
     def start_shimmer(self, color_a_rgb, color_b_rgb, target_brightness=TARGET_BRIGHTNESS):
-        """
-        Begin crossfading between color_a and color_b indefinitely.
-        If color_a == color_b this results in a steady color (useful for mono).
-        """
         if not self.np:
             return
         self.mode = 'shimmer'
+        # scale to requested target brightness (driver brightness kept at 1.0)
         self.g1 = scale_color(color_a_rgb, target_brightness)
         self.g2 = scale_color(color_b_rgb, target_brightness)
         self.shimmer_phase = 'g1_to_g2'
-        # use a slightly slower crossfade for a pleasant shimmer
         self._start_phase(self.g1, self.g2, max(self.fade_ms * 2, 1), self.shimmer_phase)
 
     def _advance_shimmer_phase(self):
@@ -417,69 +324,11 @@ class LEDController:
             except Exception:
                 pass
 
-
-# --- display_colors_from_code: always uses shimmer with two colors ----------------
-def display_colors_from_code(code: str):
-    """
-    Always drives the LED using the shimmer function (two colors input).
-    - For len == 1: call shimmer(color, color) -> steady
-    - For len == 2: shimmer(color0, color1)
-    - For len >= 3: pick two 'cold' colors present (priority U, G, W). If fewer than 2 cold colors,
-      fall back to the first two distinct colors in the code list.
-    """
-    if not code or npixel is None:
-        return
-    code = code.upper()
-    colors_seq = []
-    for ch in code:
-        if ch in PALETTE_WUBRG:
-            colors_seq.append((ch, PALETTE_WUBRG[ch]))
-
-    if not colors_seq:
-        return
-
-    # Helper to pick two "cold" colors from the ordered sequence.
-    def pick_two_cold(seq):
-        # Preference order for "cold" colors (user-chosen): U (blue), G (green), W (white), B (black), R (red)
-        cold_priority = ['U', 'G', 'W', 'B', 'R']
-        found = []
-        # Keep original order relative to the code string, but filter by cold priority presence
-        for key, rgb in seq:
-            if key in cold_priority and key not in [k for k, _ in found]:
-                found.append((key, rgb))
-            if len(found) >= 2:
-                break
-        # If still fewer than 2, choose additional distinct colors from seq in order
-        if len(found) < 2:
-            for key, rgb in seq:
-                if key not in [k for k, _ in found]:
-                    found.append((key, rgb))
-                if len(found) >= 2:
-                    break
-        # If only one distinct color overall, duplicate it
-        if len(found) == 1:
-            found.append(found[0])
-        return found[0][1], found[1][1]
-
-    if len(colors_seq) == 1:
-        # mono -> steady color using shimmer with identical colors
-        _, rgb = colors_seq[0]
-        led_ctrl.start_shimmer(rgb, rgb, target_brightness=TARGET_BRIGHTNESS)
-    elif len(colors_seq) == 2:
-        _, a = colors_seq[0]
-        _, b = colors_seq[1]
-        led_ctrl.start_shimmer(a, b, target_brightness=TARGET_BRIGHTNESS)
-    else:
-        # 3+ -> pick two cold colors (fall back to first two)
-        a_col, b_col = pick_two_cold(colors_seq)
-        led_ctrl.start_shimmer(a_col, b_col, target_brightness=TARGET_BRIGHTNESS)
-
-
-# create controller
 led_ctrl = LEDController(npixel)
 
+
 # --------------------------
-# Robust fetch for color code (handles SERVER with/without scheme)
+# Robust fetch for color code
 # --------------------------
 def fetch_player_color_code(player):
     resp = None
@@ -492,7 +341,6 @@ def fetch_player_color_code(player):
             url = "http://{}/api/current/{}".format(base, player)
 
         resp = urequests.get(url)
-        # parse JSON safely
         data = None
         try:
             data = resp.json()
@@ -510,7 +358,6 @@ def fetch_player_color_code(player):
         if colors is None:
             return None
 
-        # Normalize possible types
         if isinstance(colors, (list, tuple)):
             parts = []
             for c in colors:
@@ -524,7 +371,6 @@ def fetch_player_color_code(player):
             s = colors.strip()
             return s.upper() if s else None
 
-        # fallback for numbers / other types
         try:
             s = str(colors).strip()
             return s.upper() if s else None
@@ -541,11 +387,41 @@ def fetch_player_color_code(player):
         return None
 
 
+# --------------------------
+# display logic: always shimmer (mono uses lighter/darker variants)
+# --------------------------
+def display_colors_from_code(code):
+    if not code or npixel is None:
+        return
+    code = code.upper()
+    colors_seq = []
+    for ch in code:
+        if ch in PALETTE_WUBRG:
+            colors_seq.append((ch, PALETTE_WUBRG[ch]))
+    if not colors_seq:
+        return
+
+    if len(colors_seq) == 1:
+        _, base = colors_seq[0]
+        # use HSV-derived lighter/darker pair for a clear mono shimmer
+        print("LED: mono -> compute lighter/darker and shimmer")
+        led_ctrl.start_mono_variants(base, lighter_delta=0.30, darker_delta=0.45, target_brightness=TARGET_BRIGHTNESS)
+
+    elif len(colors_seq) == 2:
+        _, a = colors_seq[0]
+        _, b = colors_seq[1]
+        print("LED: two-color shimmer:", a, "<->", b)
+        led_ctrl.start_shimmer(a, b, target_brightness=TARGET_BRIGHTNESS)
+
+    else:
+        print("LED: multi (3+) detected; using gold shimmer")
+        led_ctrl.start_shimmer(GOLD1, GOLD2, target_brightness=TARGET_BRIGHTNESS)
+
 
 # --------------------------
-# UI helpers: loading screen (unchanged)
+# Loading screen (kept)
 # --------------------------
-def loading_screen(lcd, player, repeat_each_strip=True):
+def loading_screen(lcd, player):
     BLACK = 0x0000
     WHITE = 0xFFFF
     msg = "Loading: P{}".format(player)
@@ -565,35 +441,27 @@ def loading_screen(lcd, player, repeat_each_strip=True):
 
 
 # --------------------------
-# Button + main loop integration (non-blocking)
+# Button + main loop (minimal)
 # --------------------------
 DEFAULT_BUTTON_PIN = 2
 current_player = 1
-current_face = "front"
-_busy = False  # legacy busy flag (not used for button IRQ)
 counter = 0
 
-# Pending-request flags set by IRQ-safe handler
 _pending_player_change = False
 _requested_player = None
 
-# Lightweight IRQ-safe handler: only set request flag
 def _on_button_pressed_irq(pin=None):
     global _pending_player_change, _requested_player
     try:
-        # compute next player number quickly
         _requested_player = (current_player % 4) + 1
         _pending_player_change = True
     except Exception:
-        # swallow errors in IRQ context
         _pending_player_change = True
         _requested_player = 1
 
-# Initialize button module and wire IRQ callback.
 _use_poll_fallback = False
 try:
     import button
-    # use the tiny IRQ handler
     button.init(pin_no=DEFAULT_BUTTON_PIN, callback=_on_button_pressed_irq, debounce_ms=200)
     if hasattr(button, "poll_pressed") and getattr(button, "_HAS_SCHEDULE", True) is False:
         _use_poll_fallback = True
@@ -601,10 +469,8 @@ except Exception as e:
     print("button module not available or failed to init:", e)
     _use_poll_fallback = True
 
-# Config toggles
 DEBUG_TOUCH = True
 ORIENT_SWAP = False
-
 DEBOUNCE_MS = 300
 last_change_ts = 0
 
@@ -621,7 +487,7 @@ def map_touch_to_screen(raw_x, raw_y, lcd):
 
 
 # --------------------------
-# Start: show initial player + initial LED behavior
+# Start: initial display + LED start
 # --------------------------
 print("Showing initial player", current_player)
 try:
@@ -629,7 +495,6 @@ try:
 except Exception as e:
     print("Initial display error:", e)
 
-# Kick off initial LED behavior based on API (non-blocking)
 try:
     code = fetch_player_color_code(current_player)
     print("Fetched colors:", code)
@@ -638,11 +503,8 @@ except Exception as e:
     print("Error fetching/starting initial LED behavior:", e)
 
 
-# --------------------------
-# Main keep-alive loop (updates LED controller frequently)
-# --------------------------
+# Main loop
 while True:
-    # Poll fallback for button module if needed
     if _use_poll_fallback:
         try:
             import button as _btn
@@ -651,30 +513,19 @@ while True:
         except Exception:
             pass
 
-    # Update LED animation (non-blocking)
+    # Update LED animation frequently (non-blocking)
     try:
         led_ctrl.update()
     except Exception as e:
         print("LED update error:", e)
 
-    # Handle pending player change request (do heavy work in main loop)
+    # Handle pending player changes (do heavy work in main loop)
     if _pending_player_change:
-        # capture and clear flag quickly
         req = _requested_player
         _pending_player_change = False
-
-        # switch player
         current_player = req
         print("Processing requested player change ->", current_player)
 
-        # quick blink (legacy)
-        try:
-            if led:
-                led.value(1)
-        except Exception:
-            pass
-
-        # show loading screen and display image (blocking network work done here)
         try:
             loading_screen(lcd, current_player)
         except Exception as e:
@@ -685,7 +536,6 @@ while True:
         except Exception as e:
             print("Error fetching/displaying player {}: {}".format(current_player, e))
 
-        # fetch color code and start LED behavior (non-blocking)
         try:
             code = fetch_player_color_code(current_player)
             print("Fetched colors:", code)
@@ -693,14 +543,7 @@ while True:
         except Exception as e:
             print("Error fetching/displaying player LED colors:", e)
 
-        # turn off legacy LED blink
-        try:
-            if led:
-                led.value(0)
-        except Exception:
-            pass
-
-    # Touch handling (unchanged)
+    # Touch handling (kept)
     get = None
     try:
         get = lcd.touch_get()
@@ -744,7 +587,6 @@ while True:
                 except Exception as e:
                     print("display error:", e)
 
-        time.sleep_ms(40)  # keep loop responsive
+        time.sleep_ms(40)
     else:
-        # no touch - still keep loop responsive so LED updates run smoothly
         time.sleep_ms(40)
