@@ -1,6 +1,5 @@
 from machine import Pin, SPI, PWM
 import framebuf, time, gc
-import urequests
 from display import show_image
 from secrets import SERVER
 
@@ -9,6 +8,13 @@ try:
     from pio_neopixel import NeoPixelPIO
 except Exception:
     NeoPixelPIO = None
+
+# Free up some memory
+try:
+    gc.collect()
+    print("main: free memory before LCD alloc:", gc.mem_free())
+except Exception:
+    pass
 
 # --------------------------
 # LCD driver (kept minimal for used methods)
@@ -28,7 +34,16 @@ class LCD_3inch5(framebuf.FrameBuffer):
         self.cs(1); self.dc(1); self.rst(1)
         self.tp_cs(1)
         self.spi = SPI(1, 60_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
-        self.buffer = bytearray(self.width * self.height * 2)
+        try:
+            self.buffer = bytearray(self.width * self.height * 2)
+        except Exception as e:
+            print("LCD alloc failed:", e)
+            try:
+                gc.collect()
+                print("free after GC:", gc.mem_free())
+            except Exception:
+                pass
+            raise
         super().__init__(self.buffer, self.width, self.height, framebuf.RGB565)
         self._buf1 = bytearray(1)
         self._init()
@@ -115,7 +130,12 @@ class LCD_3inch5(framebuf.FrameBuffer):
 
 
 lcd = LCD_3inch5()
-gc.collect()
+
+try:
+    gc.collect()
+    print("main: free memory after LCD alloc:", gc.mem_free())
+except Exception:
+    pass
 
 # --------------------------
 # NeoPixel + palette
@@ -336,7 +356,10 @@ led_ctrl = LEDController(npixel)
 # --------------------------
 def fetch_player_color_code(player):
     resp = None
+    ureq = None
     try:
+        # import urequests only when we actually fetch
+        import urequests as ureq
         base = SERVER.strip()
         if base.startswith("http://") or base.startswith("https://"):
             base = base.rstrip("/")
@@ -344,7 +367,7 @@ def fetch_player_color_code(player):
         else:
             url = "http://{}/api/current/{}".format(base, player)
 
-        resp = urequests.get(url)
+        resp = ureq.get(url)
         data = None
         try:
             data = resp.json()
@@ -389,6 +412,16 @@ def fetch_player_color_code(player):
         except Exception:
             pass
         return None
+    finally:
+        # ensure we drop urequests reference and collect after the fetch
+        try:
+            del ureq
+        except Exception:
+            pass
+        try:
+            gc.collect()
+        except Exception:
+            pass
 
 
 # --------------------------
