@@ -216,6 +216,23 @@ def _set_player_state(player: int, *, last_query: str, card: dict, premium: str 
 
     border_crop = _extract_border_crop(card) or faces_meta[0]["image_url"]
 
+    # compute canonical color code (one-to-five-letter abbreviation)
+    def _color_code_for_card(card_obj: dict) -> str:
+        type_line = card_obj.get("type_line", "") or ""
+        colors = card_obj.get("colors") or []
+        # Land -> "L"
+        if "Land" in type_line:
+            return "L"
+        # canonical order
+        order = ["W", "U", "B", "R", "G"]
+        if colors:
+            # preserve canonical order W U B R G
+            return "".join([c for c in order if c in colors])
+        # no colors and not a land -> colorless "C"
+        return "C"
+
+    color_code = _color_code_for_card(card)
+
     with _state_lock:
         st = _state_by_player[player]
         st["last_query"]      = last_query
@@ -223,6 +240,7 @@ def _set_player_state(player: int, *, last_query: str, card: dict, premium: str 
         st["faces_meta"]      = faces_meta
         st["border_crop_url"] = border_crop
         st["premium"]         = premium
+        st["colors"]          = color_code
 
         result = {
             "last_query":      st["last_query"],
@@ -230,6 +248,7 @@ def _set_player_state(player: int, *, last_query: str, card: dict, premium: str 
             "faces":           st["faces_meta"],
             "border_crop_url": st["border_crop_url"],
             "premium":         st["premium"],
+            "colors":          st["colors"],
         }
 
     _schedule_render(player)

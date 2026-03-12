@@ -381,6 +381,7 @@ def api_current_player(player: int):
             "faces": st["faces_meta"],
             "border_crop_url": st["border_crop_url"],
             "premium": st["premium"],
+            "colors": st.get("colors"),
         })
 
 @app.post("/api/send/<int:player>")

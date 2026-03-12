@@ -234,6 +234,16 @@ _busy = False  # prevent re-entrancy
 
 counter = 0
 
+def fetch_player_color_code(player: int) -> str | None:
+    try:
+        resp = urequests.get("http://{}/api/current/{}".format(SERVER, player))
+        data = resp.json()
+        resp.close()
+        return data.get("colors")
+    except Exception as e:
+        print("Failed to fetch color code:", e)
+        return None
+
 def _on_button_pressed():
     """
     Called when the button press is scheduled to run in VM context
