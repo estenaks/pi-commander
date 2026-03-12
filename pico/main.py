@@ -143,9 +143,12 @@ PALETTE_WUBRG = {
     "B": (20, 10, 0),
     "R": (220, 0, 0),
     "G": (0, 115, 20),
+    "C": (180, 184, 192),
+    "L": (120, 78, 40),
 }
 GOLD1 = (255, 191, 0)
 GOLD2 = (255, 220, 115)
+_last_colors_cache = {} 
 
 
 # --------------------------
@@ -539,6 +542,8 @@ while True:
         try:
             code = fetch_player_color_code(current_player)
             print("Fetched colors:", code)
+            # cache result (None is a valid cache entry meaning "no color data")
+            _last_colors_cache[current_player] = code
             display_colors_from_code(code)
         except Exception as e:
             print("Error fetching/displaying player LED colors:", e)
