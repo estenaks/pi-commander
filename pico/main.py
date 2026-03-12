@@ -268,11 +268,11 @@ def lerp_tuple(a, b, t):
 class LEDController:
     """
     Stateful non-blocking LED animator.
-    Call update() frequently from the main loop.
+
     Modes:
-      - mono: fade in to target and hold forever
-      - two: alternate A and B forever (fade_in -> hold -> fade_out -> next)
-      - multi: crossfade gold1<->gold2 forever
+      - mono: fade in to target and hold (implemented via shimmer with same color)
+      - two: alternate A and B forever (fade_in -> hold -> fade_out -> next)  [kept for backward compat]
+      - shimmer: crossfade between two arbitrary colors indefinitely (this replaces 'multi' gold shimmer)
     """
     def __init__(self, npixel):
         self.np = npixel
@@ -296,9 +296,9 @@ class LEDController:
         self.cur_from = from_rgb
         self.cur_to = to_rgb
         self.start_ms = self._now()
-        self.phase_ms = duration_ms
+        self.phase_ms = max(int(duration_ms), 1)
         self.phase = phase_name
-        # draw initial color for this phase
+        # immediately draw initial color for the phase
         self._step(0.0)
 
     def _step(self, t):
@@ -323,10 +323,9 @@ class LEDController:
                 else:
                     t = elapsed / self.phase_ms
                     self._step(t)
-            # hold: nothing to do (color is maintained on the LED)
+            # hold: nothing to do
 
         elif self.mode == 'two':
-            # phases: a_fade_in, a_hold, a_fade_out, b_fade_in, b_hold, b_fade_out
             elapsed = time.ticks_diff(now, self.start_ms)
             if elapsed >= self.phase_ms:
                 self._advance_two_phase()
@@ -334,18 +333,17 @@ class LEDController:
                 if self.phase_ms > 0:
                     t = elapsed / self.phase_ms
                     self._step(t)
-                else:
-                    self._advance_two_phase()
 
-        elif self.mode == 'multi':
+        elif self.mode == 'shimmer':
+            # shimmer crossfades between g1 and g2: phases 'g1_to_g2' and 'g2_to_g1'
             elapsed = time.ticks_diff(now, self.start_ms)
             if elapsed >= self.phase_ms:
-                self._advance_multi_phase()
+                self._advance_shimmer_phase()
             else:
                 t = elapsed / self.phase_ms
                 self._step(t)
 
-    # MONO
+    # MONO helper: fades in and holds by using shimmer with identical colors
     def start_mono(self, rgb, target_brightness=TARGET_BRIGHTNESS):
         if not self.np:
             return
@@ -353,7 +351,7 @@ class LEDController:
         self.mode = 'mono'
         self._start_phase((0,0,0), tg, self.fade_ms, 'fade_in')
 
-    # TWO (infinite)
+    # TWO color (left as-is, indefinite)
     def start_two(self, a_rgb, b_rgb, target_brightness=TARGET_BRIGHTNESS, hold_ms=3000):
         if not self.np:
             return
@@ -384,28 +382,31 @@ class LEDController:
             self.two_phase = 'a_fade_in'
             self._start_phase((0,0,0), self.a_target, self.fade_ms, self.two_phase)
         else:
-            # safety reset
             self.two_phase = 'a_fade_in'
             self._start_phase((0,0,0), self.a_target, self.fade_ms, self.two_phase)
 
-    # MULTI gold crossfade
-    def start_multi_shimmer(self, gold1_rgb, gold2_rgb, target_brightness=TARGET_BRIGHTNESS):
+    # SHIMMER (generalized crossfade between any two colors)
+    def start_shimmer(self, color_a_rgb, color_b_rgb, target_brightness=TARGET_BRIGHTNESS):
+        """
+        Begin crossfading between color_a and color_b indefinitely.
+        If color_a == color_b this results in a steady color (useful for mono).
+        """
         if not self.np:
             return
-        self.mode = 'multi'
-        self.g1 = scale_color(gold1_rgb, target_brightness)
-        self.g2 = scale_color(gold2_rgb, target_brightness)
-        self.multi_phase = 'g1_to_g2'
-        # slower crossfade: use double fade_ms for smoother shimmer
-        self._start_phase(self.g1, self.g2, max(self.fade_ms * 2, 1), self.multi_phase)
+        self.mode = 'shimmer'
+        self.g1 = scale_color(color_a_rgb, target_brightness)
+        self.g2 = scale_color(color_b_rgb, target_brightness)
+        self.shimmer_phase = 'g1_to_g2'
+        # use a slightly slower crossfade for a pleasant shimmer
+        self._start_phase(self.g1, self.g2, max(self.fade_ms * 2, 1), self.shimmer_phase)
 
-    def _advance_multi_phase(self):
-        if self.multi_phase == 'g1_to_g2':
-            self.multi_phase = 'g2_to_g1'
-            self._start_phase(self.g2, self.g1, max(self.fade_ms * 2, 1), self.multi_phase)
+    def _advance_shimmer_phase(self):
+        if self.shimmer_phase == 'g1_to_g2':
+            self.shimmer_phase = 'g2_to_g1'
+            self._start_phase(self.g2, self.g1, max(self.fade_ms * 2, 1), self.shimmer_phase)
         else:
-            self.multi_phase = 'g1_to_g2'
-            self._start_phase(self.g1, self.g2, max(self.fade_ms * 2, 1), self.multi_phase)
+            self.shimmer_phase = 'g1_to_g2'
+            self._start_phase(self.g1, self.g2, max(self.fade_ms * 2, 1), self.shimmer_phase)
 
     def stop(self):
         self.mode = None
@@ -415,6 +416,63 @@ class LEDController:
                 self.np.off()
             except Exception:
                 pass
+
+
+# --- display_colors_from_code: always uses shimmer with two colors ----------------
+def display_colors_from_code(code: str):
+    """
+    Always drives the LED using the shimmer function (two colors input).
+    - For len == 1: call shimmer(color, color) -> steady
+    - For len == 2: shimmer(color0, color1)
+    - For len >= 3: pick two 'cold' colors present (priority U, G, W). If fewer than 2 cold colors,
+      fall back to the first two distinct colors in the code list.
+    """
+    if not code or npixel is None:
+        return
+    code = code.upper()
+    colors_seq = []
+    for ch in code:
+        if ch in PALETTE_WUBRG:
+            colors_seq.append((ch, PALETTE_WUBRG[ch]))
+
+    if not colors_seq:
+        return
+
+    # Helper to pick two "cold" colors from the ordered sequence.
+    def pick_two_cold(seq):
+        # Preference order for "cold" colors (user-chosen): U (blue), G (green), W (white), B (black), R (red)
+        cold_priority = ['U', 'G', 'W', 'B', 'R']
+        found = []
+        # Keep original order relative to the code string, but filter by cold priority presence
+        for key, rgb in seq:
+            if key in cold_priority and key not in [k for k, _ in found]:
+                found.append((key, rgb))
+            if len(found) >= 2:
+                break
+        # If still fewer than 2, choose additional distinct colors from seq in order
+        if len(found) < 2:
+            for key, rgb in seq:
+                if key not in [k for k, _ in found]:
+                    found.append((key, rgb))
+                if len(found) >= 2:
+                    break
+        # If only one distinct color overall, duplicate it
+        if len(found) == 1:
+            found.append(found[0])
+        return found[0][1], found[1][1]
+
+    if len(colors_seq) == 1:
+        # mono -> steady color using shimmer with identical colors
+        _, rgb = colors_seq[0]
+        led_ctrl.start_shimmer(rgb, rgb, target_brightness=TARGET_BRIGHTNESS)
+    elif len(colors_seq) == 2:
+        _, a = colors_seq[0]
+        _, b = colors_seq[1]
+        led_ctrl.start_shimmer(a, b, target_brightness=TARGET_BRIGHTNESS)
+    else:
+        # 3+ -> pick two cold colors (fall back to first two)
+        a_col, b_col = pick_two_cold(colors_seq)
+        led_ctrl.start_shimmer(a_col, b_col, target_brightness=TARGET_BRIGHTNESS)
 
 
 # create controller
@@ -482,30 +540,6 @@ def fetch_player_color_code(player):
             pass
         return None
 
-
-# --------------------------
-# Non-blocking display decision (kicks off led_ctrl modes)
-# --------------------------
-def display_colors_from_code(code):
-    """
-    Non-blocking: start an LEDController mode and return immediately.
-    code: string with letters from W U B R G (order preserved).
-    """
-    if not code or npixel is None:
-        return
-    code = code.upper()
-    colors = []
-    for ch in code:
-        if ch in PALETTE_WUBRG:
-            colors.append(PALETTE_WUBRG[ch])
-    if len(colors) == 0:
-        return
-    if len(colors) == 1:
-        led_ctrl.start_mono(colors[0], target_brightness=TARGET_BRIGHTNESS)
-    elif len(colors) == 2:
-        led_ctrl.start_two(colors[0], colors[1], target_brightness=TARGET_BRIGHTNESS, hold_ms=3000)
-    else:
-        led_ctrl.start_multi_shimmer(GOLD1, GOLD2, target_brightness=TARGET_BRIGHTNESS)
 
 
 # --------------------------
