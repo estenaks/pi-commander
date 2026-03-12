@@ -8,6 +8,17 @@ try:
     from pio_neopixel import NeoPixelPIO
 except Exception:
     NeoPixelPIO = None
+    
+#Temp:
+def _new_spi(freq):
+    # helper to create/init and give a tiny settle delay so hardware is stable
+    try:
+        s = SPI(1, baudrate=freq, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
+    except Exception:
+        s = SPI(1, freq, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
+    # tiny settle
+    time.sleep_ms(5)
+    return s
 
 # Free up some memory
 try:
@@ -33,19 +44,19 @@ class LCD_3inch5(framebuf.FrameBuffer):
         self.irq = Pin(self.TP_IRQ, Pin.IN, Pin.PULL_UP)
         self.cs(1); self.dc(1); self.rst(1)
         self.tp_cs(1)
-        # Lower frequency
-        self.spi = SPI(1, 10_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
+        self.spi = _new_spi(20_000_000)
         try:
             self.buffer = bytearray(self.width * self.height * 2)
         except Exception as e:
-            print("lcd_test3: framebuffer alloc failed:", e)
+            print("lcd_test4: framebuffer alloc failed:", e)
             gc.collect()
-            print("lcd_test3: free after GC:", gc.mem_free())
+            print("lcd_test4: free mem after GC:", gc.mem_free())
             raise
         super().__init__(self.buffer, self.width, self.height, framebuf.RGB565)
         self._buf1 = bytearray(1)
         self._init()
         PWM(Pin(13), freq=1000).duty_u16(65535)
+        print("lcd_test4: init complete")
 
     def _cmd(self, c):
         self._buf1[0] = c
@@ -79,6 +90,7 @@ class LCD_3inch5(framebuf.FrameBuffer):
 
     def _show(self, y_start, y_end):
         import time as _t
+        print("lcd_test4: starting _show y_start", y_start, "y_end", y_end)
         self._cmd(0x2A)
         self._dat(0x00); self._dat(0x00)
         self._dat(0x01); self._dat(0x3F)
@@ -90,18 +102,25 @@ class LCD_3inch5(framebuf.FrameBuffer):
         self.cs(1); self.dc(1); self.cs(0)
         try:
             mv = memoryview(self.buffer)
-            chunk_size = 1024  # smaller chunks
+            chunk_size = 2048
             for i in range(0, len(mv), chunk_size):
                 self.spi.write(mv[i:i+chunk_size])
+                # a very short sleep (yields) to allow PIO/IRQs to run
                 _t.sleep_ms(1)
         except Exception as e:
-            print("lcd_test3: chunked write error:", e)
+            print("lcd_test4: chunked write exception:", e)
             try:
                 self.spi.write(self.buffer)
             except Exception as e2:
-                print("lcd_test3: fallback write failed:", e2)
+                print("lcd_test4: fallback write failed too:", e2)
         finally:
             self.cs(1)
+            print("lcd_test4: finished _show")
+            try:
+                gc.collect()
+                print("lcd_test4: free mem in _show:", gc.mem_free())
+            except Exception:
+                pass
 
     def show_up(self):   self._show(0x000, 0x09F)
     def show_mid(self):  self._show(0x0A0, 0x13F)
@@ -119,10 +138,12 @@ class LCD_3inch5(framebuf.FrameBuffer):
     def touch_get(self):
         if not self.touch_present():
             return None
+        # use helper to set lower freq and settle
         try:
             self.spi.init(baudrate=5_000_000)
+            time.sleep_ms(3)
         except Exception:
-            self.spi = SPI(1, 5_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
+            self.spi = _new_spi(5_000_000)
         self.tp_cs(0)
         X_Point = 0
         Y_Point = 0
@@ -141,9 +162,10 @@ class LCD_3inch5(framebuf.FrameBuffer):
         finally:
             self.tp_cs(1)
             try:
-                self.spi.init(baudrate=10_000_000)
+                self.spi.init(baudrate=20_000_000)
+                time.sleep_ms(3)
             except Exception:
-                self.spi = SPI(1, 10_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
+                self.spi = _new_spi(20_000_000)
         return [X_Point, Y_Point]
 
 
