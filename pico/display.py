@@ -1,29 +1,96 @@
-import urequests, gc
+import gc
 
 def show_image(lcd, server, player=1, face="front", counter=None):
-    """Fetch and display a card image from the server, one strip at a time.
-
-    Optional:
-      counter: int | None
-        If int and non-zero, draw a small black rectangle with white text
-        (e.g. '+1/+1' or '-1/-1') centered near the bottom of the top strip.
-        If 0 or None, draw nothing.
     """
+    Stream an image strip-by-strip into the lcd.buffer without creating large
+    temporary bytes objects.  This reduces peak heap pressure and avoids
+    large transient allocations that can cause GC/IRQ/timing issues.
+
+    Behavior:
+      - Reads response.raw in 4KB chunks directly into the framebuffer memoryview.
+      - Prints light diagnostics (strip start/finish and free heap) so you can
+        see where a freeze occurs.
+      - Does a safe overlay draw for the top strip (same as before).
+      - Ensures resp and urequests references are deleted and gc.collect() is run.
+    """
+    # expected bytes per strip (RGB565)
+    expected_len = lcd.width * lcd.height // 3  # not used; strips are full buffer portions in current layout
+    # note: original code expects the server to return exactly the bytes for the strip;
+    # we will stream into lcd.buffer starting at 0 for each strip (server provides exactly that strip)
     for strip_idx, show_fn in ((0, lcd.show_up), (1, lcd.show_mid), (2, lcd.show_down)):
         url = "{}/img/{}/{}/raw?strip={}".format(server, player, face, strip_idx)
+        resp = None
         try:
-            r = urequests.get(url)
+            # lazy import to avoid keeping networking module + buffers resident when not fetching
+            import urequests
         except Exception as e:
-            # network failure — skip this strip
+            print("show_image: cannot import urequests:", e)
+            return
+
+        try:
+            print("show_image: fetching strip", strip_idx, "->", url)
+            resp = urequests.get(url, timeout=10)
+        except Exception as e:
             print("show_image: request failed for", url, ":", e)
+            try:
+                if resp is not None:
+                    resp.close()
+            except Exception:
+                pass
+            # cleanup references and continue to next strip
+            try:
+                del resp
+            except Exception:
+                pass
+            try:
+                del urequests
+            except Exception:
+                pass
+            gc.collect()
             continue
 
-        if r.status_code == 200:
-            # raw bytes are placed into the framebuffer buffer
-            try:
-                lcd.buffer[:] = r.content
-            except Exception as e:
-                print("show_image: failed to write buffer:", e)
+        # Read the response body into the framebuffer without building large temps.
+        try:
+            mv = memoryview(lcd.buffer)
+            off = 0
+            # read in chunks from the response raw stream (urequests compatible)
+            while True:
+                chunk = None
+                try:
+                    # r.raw.read may return fewer bytes than requested; read up to 4096
+                    chunk = resp.raw.read(4096)
+                except Exception as e:
+                    # some urequests builds may not expose raw or may raise; fall back to resp.content
+                    # but avoid creating huge temporary if possible
+                    # we'll break here and try fallback below
+                    # print debug and break to fallback
+                    # print("show_image: raw.read failed:", e)
+                    chunk = None
+                    break
+
+                if not chunk:
+                    break
+                ln = len(chunk)
+                mv[off:off+ln] = chunk
+                off += ln
+                # defensive: avoid overrunning lcd.buffer
+                if off >= len(mv):
+                    break
+
+            # if raw.read wasn't available or returned nothing, fallback to resp.content
+            if off == 0:
+                try:
+                    b = resp.content
+                    if b:
+                        mv[0:len(b)] = b
+                        off = len(b)
+                except Exception as e:
+                    print("show_image: fallback to resp.content failed:", e)
+
+            if off == 0:
+                print("show_image: got zero bytes for", url)
+            else:
+                print("show_image: received %d bytes for strip %d" % (off, strip_idx))
 
             # Draw overlay only on the top strip (strip_idx == 0)
             if strip_idx == 0 and counter is not None and counter != 0:
@@ -51,23 +118,37 @@ def show_image(lcd, server, player=1, face="front", counter=None):
                     try:
                         lcd.text(msg, text_x, text_y, 0xFFFF)
                     except Exception:
-                        # If text() is not available, leave the black box as indicator
                         pass
                 except Exception as e:
                     print("show_image: overlay draw failed:", e)
 
-        else:
-            print("show_image: got status", r.status_code, "for", url)
-
-        try:
-            r.close()
-        except Exception:
-            pass
+        except Exception as e:
+            print("show_image: failed to stream into buffer for", url, ":", e)
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass
+            try:
+                del resp
+            except Exception:
+                pass
+            try:
+                del urequests
+            except Exception:
+                pass
 
         # push this strip to screen
         try:
+            print("show_image: pushing strip", strip_idx, "to screen")
             show_fn()
+            print("show_image: pushed strip", strip_idx)
         except Exception as e:
             print("show_image: show_fn failed for strip", strip_idx, ":", e)
 
-        gc.collect()
+        # force GC and print free heap so we can observe memory behavior between strips
+        try:
+            gc.collect()
+            print("show_image: free mem after strip %d: %d" % (strip_idx, gc.mem_free()))
+        except Exception:
+            pass
