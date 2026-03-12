@@ -148,7 +148,8 @@ PALETTE_WUBRG = {
 }
 GOLD1 = (255, 191, 0)
 GOLD2 = (255, 220, 115)
-_last_colors_cache = {} 
+_last_colors_cache = {}
+current_face = "front"
 
 
 # --------------------------
