@@ -217,21 +217,63 @@ def _set_player_state(player: int, *, last_query: str, card: dict, premium: str 
     border_crop = _extract_border_crop(card) or faces_meta[0]["image_url"]
 
     # compute canonical color code (one-to-five-letter abbreviation)
-    def _color_code_for_card(card_obj: dict) -> str:
-        type_line = card_obj.get("type_line", "") or ""
-        colors = card_obj.get("colors") or []
-        # Land -> "L"
-        if "Land" in type_line:
-            return "L"
-        # canonical order
+    def _color_code_for_card(card_obj: dict, faces_meta_list: list[dict]) -> str:
+        """
+        Return a short color code:
+          - 'L' for lands
+          - canonical concatenation of W U B R G for colored cards (e.g. 'WU', 'WUB')
+          - 'C' for colorless
+        Strategy:
+          1) Prefer top-level card_obj['colors'] if present.
+          2) Otherwise, look into card_faces (or the provided faces_meta_list) and union per-face colors.
+          3) If no colors but a face type_line contains 'Land' -> 'L'.
+          4) Else 'C'.
+        """
         order = ["W", "U", "B", "R", "G"]
-        if colors:
-            # preserve canonical order W U B R G
-            return "".join([c for c in order if c in colors])
-        # no colors and not a land -> colorless "C"
+
+        # 1) top-level colors (most cards)
+        top_colors = card_obj.get("colors") or []
+        if top_colors:
+            return "".join([c for c in order if c in top_colors])
+
+        # 2) card_faces fallback: union colors from each face if available
+        faces = card_obj.get("card_faces") or []
+        colors_union = set()
+        if faces:
+            for f in faces:
+                # Scryfall face may carry 'colors'; if not, try 'color_identity' as a looser fallback
+                fcols = f.get("colors")
+                if fcols:
+                    colors_union.update(fcols)
+                else:
+                    ci = f.get("color_identity") or []
+                    if ci:
+                        colors_union.update(ci)
+        else:
+            # If card_faces not present, use the already-extracted faces_meta (may include type_line)
+            # faces_meta likely doesn't contain colors, but we still keep the path for completeness.
+            for fmeta in faces_meta_list:
+                fcols = fmeta.get("colors") or []
+                if fcols:
+                    colors_union.update(fcols)
+
+        if colors_union:
+            # preserve canonical WUBRG order
+            return "".join([c for c in order if c in colors_union])
+
+        # 3) if any face is a Land -> 'L'
+        # Check card_faces type_line first, then faces_meta type_line
+        for f in (card_obj.get("card_faces") or []):
+            if "Land" in (f.get("type_line") or ""):
+                return "L"
+        for fmeta in faces_meta_list:
+            if "Land" in (fmeta.get("type_line") or ""):
+                return "L"
+
+        # 4) colorless fallback
         return "C"
 
-    color_code = _color_code_for_card(card)
+    color_code = _color_code_for_card(card, faces_meta)
 
     with _state_lock:
         st = _state_by_player[player]
