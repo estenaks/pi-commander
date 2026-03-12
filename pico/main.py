@@ -33,18 +33,14 @@ class LCD_3inch5(framebuf.FrameBuffer):
         self.irq = Pin(self.TP_IRQ, Pin.IN, Pin.PULL_UP)
         self.cs(1); self.dc(1); self.rst(1)
         self.tp_cs(1)
-        # reduced frequency but still fairly fast
-        self.spi = SPI(1, 20_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
+        # Lower frequency
+        self.spi = SPI(1, 10_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
         try:
-            # big allocation: ~320*160*2 = 102400 bytes
             self.buffer = bytearray(self.width * self.height * 2)
         except Exception as e:
-            print("lcd_test1: framebuffer alloc failed:", e)
-            try:
-                gc.collect()
-                print("lcd_test1: free after GC:", gc.mem_free())
-            except Exception:
-                pass
+            print("lcd_test3: framebuffer alloc failed:", e)
+            gc.collect()
+            print("lcd_test3: free after GC:", gc.mem_free())
             raise
         super().__init__(self.buffer, self.width, self.height, framebuf.RGB565)
         self._buf1 = bytearray(1)
@@ -68,7 +64,6 @@ class LCD_3inch5(framebuf.FrameBuffer):
         self.rst(1); _t.sleep_ms(5)
         self.rst(0); _t.sleep_ms(10)
         self.rst(1); _t.sleep_ms(5)
-        # send init sequence
         for c, d in [
             (0x21, []), (0xC2, [0x33]), (0xC5, [0x00, 0x1e, 0x80]),
             (0xB1, [0xB0]), (0x36, [0x28]),
@@ -92,22 +87,19 @@ class LCD_3inch5(framebuf.FrameBuffer):
         self._dat(y_end   >> 8); self._dat(y_end & 0xFF)
         self._cmd(0x2C)
 
-        # data mode
         self.cs(1); self.dc(1); self.cs(0)
         try:
             mv = memoryview(self.buffer)
-            chunk_size = 4096  # tune if needed
+            chunk_size = 1024  # smaller chunks
             for i in range(0, len(mv), chunk_size):
                 self.spi.write(mv[i:i+chunk_size])
-                # tiny yield to allow IRQ/PIO to run
                 _t.sleep_ms(1)
         except Exception as e:
-            print("lcd_test1: chunked write error:", e)
+            print("lcd_test3: chunked write error:", e)
             try:
-                # fallback to single write (may still fail)
                 self.spi.write(self.buffer)
             except Exception as e2:
-                print("lcd_test1: fallback write failed:", e2)
+                print("lcd_test3: fallback write failed:", e2)
         finally:
             self.cs(1)
 
@@ -127,11 +119,9 @@ class LCD_3inch5(framebuf.FrameBuffer):
     def touch_get(self):
         if not self.touch_present():
             return None
-        # change SPI speed using init rather than reassigning
         try:
             self.spi.init(baudrate=5_000_000)
         except Exception:
-            # fallback: create a new SPI instance
             self.spi = SPI(1, 5_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
         self.tp_cs(0)
         X_Point = 0
@@ -150,11 +140,10 @@ class LCD_3inch5(framebuf.FrameBuffer):
             Y_Point = Y_Point / 3.0
         finally:
             self.tp_cs(1)
-            # restore high-speed for display
             try:
-                self.spi.init(baudrate=20_000_000)
+                self.spi.init(baudrate=10_000_000)
             except Exception:
-                self.spi = SPI(1, 20_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
+                self.spi = SPI(1, 10_000_000, sck=Pin(10), mosi=Pin(11), miso=Pin(12))
         return [X_Point, Y_Point]
 
 
