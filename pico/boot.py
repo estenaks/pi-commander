@@ -335,3 +335,50 @@ def sync():
             print("    -", s)
 
 sync()
+
+# Add this after your sync() call in boot.py
+
+import time, gc, sys, network
+
+def wait_for_network(timeout=20):
+    wlan = network.WLAN(network.STA_IF)
+    start = time.time()
+    while not wlan.isconnected() and (time.time() - start) < timeout:
+        print("boot: waiting for Wi-Fi...", int(time.time() - start))
+        time.sleep(1)
+    if wlan.isconnected():
+        print("boot: Wi-Fi ready –", wlan.ifconfig()[0])
+        return True
+    else:
+        print("boot: Wi-Fi not ready after", timeout, "s")
+        return False
+
+def run_main_with_retries(retries=3, delay=2):
+    # Minimal stabilization before attempting to import main
+    time.sleep(1)        # let filesystem / PIO / drivers settle
+    gc.collect()
+    for attempt in range(1, retries + 1):
+        try:
+            print("boot: importing main (attempt {}/{})".format(attempt, retries))
+            import main  # runs main.py
+            print("boot: main imported successfully")
+            return True
+        except Exception as e:
+            print("boot: import main failed:", e)
+            try:
+                sys.print_exception(e)
+            except Exception:
+                pass
+            if attempt < retries:
+                print("boot: retrying in", delay, "s")
+                time.sleep(delay)
+                gc.collect()
+    print("boot: giving up importing main")
+    return False
+
+# If your main requires Wi-Fi, wait first; otherwise you can skip this.
+if wait_for_network(timeout=15):
+    run_main_with_retries(retries=3, delay=2)
+else:
+    # Optionally still try to run main if it's not network-dependent.
+    run_main_with_retries(retries=2, delay=2)
