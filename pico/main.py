@@ -156,6 +156,8 @@ if NeoPixelPIO is not None:
         npixel = None
 else:
     npixel = None
+# Temp while testing: 
+npixel = None
 
 PALETTE_WUBRG = {
     "W": (210, 210, 150),
