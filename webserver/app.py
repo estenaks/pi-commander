@@ -582,7 +582,7 @@ import subprocess
 import hashlib
 
 # Files in pico/ that should NOT be sent to the device
-_OTA_SKIP = {"secrets.py.example", "setup.sh", "requirements.txt"}
+_OTA_SKIP = {"secrets.py.example", "setup.sh", "requirements.txt", "/archive/*", "strip_viewer.html"}
 
 @app.get("/ota/manifest")
 def ota_manifest():
