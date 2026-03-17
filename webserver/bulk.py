@@ -13,6 +13,16 @@ import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import multiprocessing
 
+# Attempt to import the filter_cards module from the same package or as a top-level module.
+# This keeps the import tolerant for different execution contexts (module vs script).
+try:
+    import webserver.filter_cards as filter_cards
+except Exception:
+    try:
+        import filter_cards as filter_cards
+    except Exception:
+        filter_cards = None
+
 # --- Config (legacy-compatible) ----------------------------------------------
 DEFAULT_CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 METADATA_FILENAME = "metadata.json"
@@ -181,7 +191,7 @@ def sync_bulk(cache_dir: str, days: int = 7, check_only: bool = False, force_ref
 
             # Local is older than threshold -> check remote updated_at
             if remote_updated_at > local_updated_at:
-                print(f"[{data_type}] remote updated ({remote_updated_at_str}) > local ({entry['updated_at']}) -> will update")
+                print(f"[{data_type}] remote updated ({remote_updated_at_str}) > local ({entry[\"updated_at\"]}) -> will update")
                 if not check_only:
                     fname = safe_filename(data_type, download_uri)
                     dest_path = os.path.join(cache_dir, fname)
@@ -189,7 +199,7 @@ def sync_bulk(cache_dir: str, days: int = 7, check_only: bool = False, force_ref
                 else:
                     print(f"  check-only: would update {download_uri}")
             else:
-                print(f"[{data_type}] remote not newer ({remote_updated_at_str} <= {entry['updated_at']}) -> skip")
+                print(f"[{data_type}] remote not newer ({remote_updated_at_str} <= {entry[\"updated_at\"]}) -> skip")
                 entry["last_checked"] = datetime.now(timezone.utc).isoformat()
                 metadata[data_type] = entry
 
@@ -223,7 +233,7 @@ def sync_bulk(cache_dir: str, days: int = 7, check_only: bool = False, force_ref
                             "download_uri": url,
                             "last_checked": datetime.now(timezone.utc).isoformat()
                         }
-                        print(f"[{data_type}] downloaded -> {metadata[data_type]['file']}")
+                        print(f"[{data_type}] downloaded -> {metadata[data_type][\"file\"]}")
                     except Exception as e:
                         print(f"[{data_type}] download failed: {e}", file=sys.stderr)
 
@@ -235,6 +245,33 @@ def sync_bulk(cache_dir: str, days: int = 7, check_only: bool = False, force_ref
             print(f" - {t} (kept in cache; remove manually if desired)")
 
     save_metadata(cache_dir, metadata)
+
+    # If a downloaded 'all_cards__*' file exists but a corresponding
+    # 'all_cards_filtered__*' does not, run the filter to create it.
+    # This keeps the filtered NDJSON cache available without re-processing
+    # every time.
+    if filter_cards is not None:
+        try:
+            for fname in os.listdir(cache_dir):
+                if not fname.startswith("all_cards__"):
+                    continue
+                rest = fname[len("all_cards__"):]  
+                filtered_name = f"all_cards_filtered__{rest}"
+                input_path = os.path.join(cache_dir, fname)
+                filtered_path = os.path.join(cache_dir, filtered_name)
+                if os.path.exists(filtered_path):
+                    # already present
+                    continue
+                print(f"[filter] creating {filtered_name} from {fname} ...")
+                try:
+                    # create NDJSON filtered output keeping only english cards
+                    filter_cards.filter_cards(input_path, filtered_path, languages=("en",), drop_fields=None, output_format="ndjson")
+                    print(f"[filter] wrote {filtered_name}")
+                except Exception as e:
+                    print(f"[filter] failed to create {filtered_name}: {e}", file=sys.stderr)
+        except Exception as e:
+            print(f"[filter] error while scanning cache dir: {e}", file=sys.stderr)
+
     print("Done. Metadata saved to", os.path.join(cache_dir, METADATA_FILENAME))
 
 # --- CLI ---------------------------------------------------------------------
