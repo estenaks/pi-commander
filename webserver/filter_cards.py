@@ -1,7 +1,17 @@
 from typing import Iterable, Optional, Sequence, Set
 import json
 import ijson
+import decimal
 
+def _json_default(obj):
+    """json.dumps default handler: convert Decimal -> float, otherwise fail."""
+    if isinstance(obj, decimal.Decimal):
+        # Convert to float for JSON output (suitable for prices). Fallback to str() if needed.
+        try:
+            return float(obj)
+        except Exception:
+            return str(obj)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 def _process_card(card: dict, drop_fields: Optional[Iterable[str]]) -> dict:
     """Return a shallow copy of card with top-level keys in drop_fields removed."""
@@ -44,7 +54,7 @@ def filter_cards(
             for card in iter_cards(input_path):
                 if card.get("lang") in allow_langs:
                     processed = _process_card(card, drop_fields)
-                    out.write(json.dumps(processed, separators=(",", ":"), ensure_ascii=False))
+                    out.write(json.dumps(processed, separators=(",", ":"), ensure_ascii=False, default=_json_default))
                     out.write("\n")
         else:  # streaming JSON array
             first = True
@@ -54,7 +64,7 @@ def filter_cards(
                     processed = _process_card(card, drop_fields)
                     if not first:
                         out.write(",")
-                    out.write(json.dumps(processed, separators=(",", ":"), ensure_ascii=False))
+                    out.write(json.dumps(processed, separators=(",", ":"), ensure_ascii=False, default=_json_default))
                     first = False
             out.write("]")
 
