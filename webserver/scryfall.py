@@ -1,4 +1,6 @@
+#!/usr/bin/env python3
 from __future__ import annotations
+import os
 import sys
 import json
 import time
@@ -15,6 +17,17 @@ from cache import (
     _set_cached_data,
 )
 from images import CARD_BACK_WEB_URL, _any_to_bmp, _any_to_strips
+
+# Configurable via environment (.env)
+# - SCRYFALL_USER_AGENT: User-Agent header sent to Scryfall
+# - SCRYFALL_ACCEPT: Accept header to request JSON
+SCRYFALL_USER_AGENT = os.getenv("SCRYFALL_USER_AGENT", "raspberrypi-webserver-poc/0.1")
+SCRYFALL_ACCEPT = os.getenv("SCRYFALL_ACCEPT", "application/json")
+
+SCRYFALL_HEADERS = {
+    "User-Agent": SCRYFALL_USER_AGENT,
+    "Accept": SCRYFALL_ACCEPT,
+}
 
 SCRYFALL_REQUEST_DELAY = 0.050  # 50ms between requests
 
@@ -55,10 +68,7 @@ def _scryfall_get(url: str, use_cache: bool = False, cache_key: str = None, cach
 
     req = urllib.request.Request(
         url,
-        headers={
-            "User-Agent": "raspberrypi-webserver-poc/0.1",
-            "Accept": "application/json",
-        },
+        headers=SCRYFALL_HEADERS,
         method="GET",
     )
 
@@ -87,7 +97,6 @@ def _scryfall_get(url: str, use_cache: bool = False, cache_key: str = None, cach
 # ---------------------------------------------------------------------------
 # Card image helpers
 # ---------------------------------------------------------------------------
-
 def _pick_image_border_crop_only(iu: dict) -> str:
     """For Pico display: prefers border_crop (480×680)."""
     if not isinstance(iu, dict):
@@ -166,7 +175,6 @@ def _extract_border_crop(card: dict) -> str:
 # ---------------------------------------------------------------------------
 # Player state
 # ---------------------------------------------------------------------------
-
 def _require_player(player: int) -> int:
     if player not in _state_by_player:
         raise ValueError("Invalid player. Must be 1..4.")
