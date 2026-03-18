@@ -141,6 +141,9 @@ def sync_bulk(cache_dir: str, days: int = 7, check_only: bool = False, force_ref
     # (data_type, download_uri, dest_path, remote_updated_at_str)
 
     for data_type, remote_item in remote_by_type.items():
+        if data_type == "all_cards":
+            print(f"[{data_type}] skipping (we only use default_cards)", file=sys.stderr)
+            continue
         remote_updated_at_str = remote_item.get("updated_at") or remote_item.get("date")
         if not remote_updated_at_str:
             print(f"[{data_type}] warning: no updated_at on remote item; skipping", file=sys.stderr)
